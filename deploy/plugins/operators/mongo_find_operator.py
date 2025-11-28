@@ -1,7 +1,7 @@
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 
-from ..hooks.mongo_hook import MongoHook
+from hooks.mongo_hook import MongoHook
 
 
 class MongoFindOperator(BaseOperator):
