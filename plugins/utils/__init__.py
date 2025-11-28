@@ -1,0 +1,1 @@
+from .parse_coc_wiki import scrape_troop_images
