@@ -8,3 +8,5 @@ pyarrow
 fastparquet
 
 pyyaml
+
+beautifulsoup4
