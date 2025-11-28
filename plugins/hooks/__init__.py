@@ -1,0 +1,1 @@
+from .minio_hook import MinioHook
