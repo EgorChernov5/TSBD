@@ -5,7 +5,7 @@ CI_REGISTRY_IMAGE ?= airflow/default
 TAG ?= latest
 CONTAINER_IMAGE := $(CI_REGISTRY_IMAGE):$(TAG)
 
-.PHONY: env airflow-image airflow airflow-config
+.PHONY: env airflow-image airflow
 
 env:
 	cp deploy/.env.example deploy/.env
