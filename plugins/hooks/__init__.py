@@ -1,1 +1,1 @@
-from .minio_hook import MinioHook
+from plugins.hooks.minio_hook import MinioHook
