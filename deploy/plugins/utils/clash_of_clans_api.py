@@ -34,4 +34,3 @@ def get_clan_rankings():
         raise ValueError("API returned unexpected structure")
 
     return data["items"]
-    

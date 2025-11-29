@@ -37,8 +37,6 @@ class MongoHook(BaseHook):
         self.client = MongoClient(uri)
         self.db = self.client[self.database]
 
-    # ------------ БАЗОВЫЕ МЕТОДЫ ---------------
-
     def insert(self, collection: str, documents):
         """Вставка одного или нескольких документов"""
         col = self.db[collection]
@@ -46,6 +44,7 @@ class MongoHook(BaseHook):
         if isinstance(documents, list):
             ids = col.insert_many(documents).inserted_ids
             return [str(_id) for _id in ids]
+        
         _id = col.insert_one(documents).inserted_id
         return str(_id)
 
