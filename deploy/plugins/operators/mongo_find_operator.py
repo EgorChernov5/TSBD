@@ -5,7 +5,6 @@ from hooks.mongo_hook import MongoHook
 
 
 class MongoFindOperator(BaseOperator):
-
     @apply_defaults
     def __init__(
         self,

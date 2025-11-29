@@ -1,6 +1,7 @@
 import os
 from airflow.hooks.base import BaseHook
 from pymongo import MongoClient
+from bson import ObjectId
 
 
 class MongoHook(BaseHook):
@@ -43,15 +44,28 @@ class MongoHook(BaseHook):
         col = self.db[collection]
 
         if isinstance(documents, list):
-            return col.insert_many(documents).inserted_ids
-        return col.insert_one(documents).inserted_id
+            ids = col.insert_many(documents).inserted_ids
+            return [str(_id) for _id in ids]
+        _id = col.insert_one(documents).inserted_id
+        return str(_id)
 
     def find(self, collection: str, query=None, projection=None):
         """Чтение документов"""
         col = self.db[collection]
-        return list(col.find(query or {}, projection))
+
+        docs = list(col.find(query or {}, projection))
+
+        for doc in docs:
+            if "_id" in doc and isinstance(doc["_id"], ObjectId):
+                doc["_id"] = str(doc["_id"])
+
+        return docs
 
     def delete(self, collection: str, query):
         """Удаление документов"""
         col = self.db[collection]
-        return col.delete_many(query)
+        result = col.delete_many(query)
+
+        return {
+            "deleted_count": result.deleted_count
+        }

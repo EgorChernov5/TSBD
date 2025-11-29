@@ -14,7 +14,7 @@ class MinioHook(BaseHook):
         super().__init__()
 
         if host is None:
-            self.host = f"{os.getenv("MINIO_PORT")}:9000"
+            self.host = f"{os.getenv('MINIO_PORT')}:9000"
             self.access_key = os.getenv("MINIO_ROOT_USER")
             self.secret_key = os.getenv("MINIO_ROOT_PASSWORD")
             self.secure = bool(os.getenv("MINIO_SECURE", "True"))
