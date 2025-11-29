@@ -7,7 +7,7 @@ from plugins.utils import scrape_troop_images, upload_icons_to_minio
 
 with DAG(
     dag_id="coc_scrape_images",
-    start_date=datetime.now(),
+    start_date=datetime(2025, 11, 29, 8, 0, 0),
     schedule="@once",
     catchup=False,
 ) as dag:
