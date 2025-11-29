@@ -9,7 +9,7 @@ from hooks.mongo_hook import MongoHook
 from utils.clash_of_clans_api import get_api_data
 
 
-def get_clans_from_mongo():
+def get_clan_rankings_from_mongo():
     hook = MongoHook()
     finded_ids = hook.find('clan_rankings')
     if not finded_ids:
@@ -21,7 +21,7 @@ def get_clans_from_mongo():
 
 def get_clans(**context):
     # Получаем данные из XCom
-    clan_rankings = context['ti'].xcom_pull(task_ids='get_clans_from_mongo')
+    clan_rankings = context['ti'].xcom_pull(task_ids='get_clan_rankings_from_mongo')
     if not clan_rankings:
         raise ValueError('Empty clan rankings')
     
@@ -70,8 +70,8 @@ with DAG(
     tags=["clash_of_clans", "mongo", "api", "clans"]
 ):
     get_task = PythonOperator(
-        task_id="get_clans_from_mongo",
-        python_callable=get_clans_from_mongo
+        task_id="get_clan_rankings_from_mongo",
+        python_callable=get_clan_rankings_from_mongo
     )
 
     fetch_task = PythonOperator(
