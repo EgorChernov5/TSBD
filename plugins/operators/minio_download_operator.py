@@ -1,10 +1,8 @@
-from airflow.utils.decorators import apply_defaults
 from airflow.models import BaseOperator
 
-from ..hooks.minio_hook import MinioHook
+from plugins.hooks.minio_hook import MinioHook
 
 class MinioDownloadOperator(BaseOperator):
-    @apply_defaults
     def __init__(
         self,
         bucket: str,
