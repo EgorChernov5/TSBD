@@ -43,10 +43,11 @@ class MinioHook(BaseHook):
             self, 
             bucket: str, 
             object_name: str, 
-            data: bytes
+            data: bytes,
+            **kwargs,
     ):
         self.ensure_bucket_exists(bucket)
-        self.client.put_object(bucket, object_name, data, length=len(data))
+        self.client.put_object(bucket, object_name, data, **kwargs)
 
     def upload_file(
             self,
