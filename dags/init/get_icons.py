@@ -1,10 +1,9 @@
 from datetime import datetime
 
+from airflow.providers.standard.operators.python import PythonOperator
 from airflow import DAG
-from airflow.operators.python import PythonOperator
 
-from plugins.utils import scrape_troop_images
-from plugins.operators import MinioUploadOperator
+from plugins.utils import scrape_troop_images, upload_icons_to_minio
 
 with DAG(
     dag_id="coc_scrape_images",
@@ -15,14 +14,12 @@ with DAG(
 
     scrape_task = PythonOperator(
         task_id="scrape_task",
-        python_callable=scrape_troop_images,
-        provide_context=True,
+        python_callable=scrape_troop_images
     )
 
-    upload_task = MinioUploadOperator(
+    upload_task = PythonOperator(
         task_id="upload_task",
-        bucket="my-bucket",
-        source_task_ids="scrape_task"
+        python_callable=upload_icons_to_minio
     )
 
     scrape_task >> upload_task

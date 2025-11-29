@@ -1,1 +1,1 @@
-from .parse_coc_wiki import scrape_troop_images
+from plugins.utils.parse_coc_wiki import scrape_troop_images, upload_icons_to_minio

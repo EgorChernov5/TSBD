@@ -6,6 +6,9 @@ import os
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from plugins.hooks import MinioHook
+
+BUCKET = "icons"
 WIKI_BASE = "https://clashofclans.fandom.com/wiki/"
 WIKI_API = "https://clashofclans.fandom.com/api.php"
 CATEGORIES = [
@@ -116,7 +119,7 @@ def extract_levels(text: str):
     return []
 
 def scrape_troop_images(**context):
-    troops = get_all_troops()
+    troops = get_all_troops()[:5]
     logging.info(f"found {len(troops)} troops")
     results = []
     for troop in troops:
@@ -140,18 +143,37 @@ def scrape_troop_images(**context):
                 logging.info("Failed download:", url, e)
                 continue
 
-            # get img name
+            # get img name and its extension
             filename = os.path.basename(url)
-            # save img as tmp file
-            tmp = tempfile.NamedTemporaryFile(delete=False)
-            tmp.write(img_bytes)
-            tmp.close()
+            ext = "png"
 
+            # save img as tmp file
             for lvl in levels:
-                minio_key = f"{troop_slug}/{lvl}/{filename}"
+                tmp = tempfile.NamedTemporaryFile(delete=False)
+                tmp.write(img_bytes)
+                tmp.close()
+
+                minio_key = f"{troop_slug}/{lvl}/{filename}.{ext}"
                 results.append({
                     "local_path": tmp.name,
                     "minio_key": minio_key
                 })
 
-    return {"data": results}
+    return results
+
+def upload_icons_to_minio(**context):
+    # create hook
+    hook = MinioHook()
+
+    # Get data from previous task
+    data = context["ti"].xcom_pull(task_ids="scrape_task")
+
+    # Iterate over images and save it
+    for img in data:
+        try:
+            hook.upload_file(BUCKET, img["minio_key"], img["local_path"])
+            if os.path.exists(img["local_path"]):
+                os.remove(img["local_path"])
+            logging.info(f"sucessfully upload icon {img['local_path']} to {img['minio_key']}")
+        except Exception as e:
+            raise RuntimeError(f"cannot upload image to minio! error: {e}")
