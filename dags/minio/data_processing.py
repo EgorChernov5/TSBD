@@ -3,7 +3,7 @@ from datetime import datetime
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow import DAG
 
-from plugins.utils import get_raw_data, save_raw_data
+from plugins.utils import get_raw_data, save_raw_data, process_raw_data, save_processed_data
 
 with DAG(
     dag_id="coc_minio_data_processing",
@@ -22,17 +22,15 @@ with DAG(
         python_callable=save_raw_data
     )
 
-    #process_raw_data_task = PythonOperator(
-    #    task_id="process_raw_data",
-    #    python_callable=process_raw_data
-    #)
+    process_raw_data_task = PythonOperator(
+        task_id="process_raw_data",
+        python_callable=process_raw_data
+    )
 
-    #save_processed_data_task = PythonOperator(
-    #    task_id="save_processed_data",
-    #    python_callable=save_processed_data
-    #)
+    save_processed_data_task = PythonOperator(
+        task_id="save_processed_data",
+        python_callable=save_processed_data
+    )
 
-    get_raw_data_task >> [save_raw_data_task]
-
-    #get_raw_data_task >> [save_raw_data_task, process_raw_data_task]
-    #process_raw_data_task >> save_processed_data_task
+    get_raw_data_task >> [save_raw_data_task, process_raw_data_task]
+    process_raw_data_task >> save_processed_data_task
