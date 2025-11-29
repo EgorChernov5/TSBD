@@ -119,7 +119,7 @@ def extract_levels(text: str):
     return []
 
 def scrape_troop_images(**context):
-    troops = get_all_troops()[:5]
+    troops = get_all_troops()
     logging.info(f"found {len(troops)} troops")
     results = []
     for troop in troops:
