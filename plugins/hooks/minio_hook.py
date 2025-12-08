@@ -1,70 +1,55 @@
-import os
-
+from typing import Optional
 from airflow.sdk.bases.hook import BaseHook
-from minio import Minio
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
 
 class MinioHook(BaseHook):
     def __init__(
             self, 
-            host: str = None,
-            access_key: str = None,
-            secret_key: str = None,
-            secure: bool = True
+            aws_conn_id: str = "minio_s3"
     ):
         super().__init__()
-
-        if host is None:
-            self.host = f"minio:9000"
-            self.access_key = os.getenv("MINIO_ROOT_USER")
-            self.secret_key = os.getenv("MINIO_ROOT_PASSWORD")
-            self.secure = os.getenv("MINIO_SECURE", "True").lower() == "true"
-        else:
-            self.host = host
-            self.access_key = access_key
-            self.secret_key = secret_key
-            self.secure = secure
-
-        self.client = Minio(
-            self.host,
-            access_key=self.access_key,
-            secret_key=self.secret_key,
-            secure=self.secure
-        )
+        self.aws_conn_id = aws_conn_id
+        self.hook = S3Hook(aws_conn_id=self.aws_conn_id)
 
     def ensure_bucket_exists(
             self, 
             bucket_name: str
     ):
-        if not self.client.bucket_exists(bucket_name):
+        if not self.hook.check_for_bucket(bucket_name):
             self.log.info(f"Bucket '{bucket_name}' does not exist. Creating it...")
-            self.client.make_bucket(bucket_name)
+            self.hook.create_bucket(bucket_name=bucket_name)
 
     def upload_bytes(
-            self, 
-            bucket: str, 
-            object_name: str, 
-            data: bytes,
-            **kwargs,
+        self,
+        bucket: str,
+        object_name: str,
+        data: bytes,
+        put_kwargs: Optional[dict] = None,
     ):
         self.ensure_bucket_exists(bucket)
-        self.client.put_object(bucket, object_name, data, **kwargs)
+        client = self.hook.get_conn()
+        kwargs = put_kwargs.copy() if put_kwargs else {}
+        client.put_object(Bucket=bucket, Key=object_name, Body=data, **kwargs)
 
     def upload_file(
-            self,
-            bucket: str, 
-            object_name: str, 
-            file_path: str
+        self,
+        bucket: str,
+        object_name: str,
+        file_path: str,
+        replace: bool = True,
     ):
         self.ensure_bucket_exists(bucket)
-        self.client.fput_object(bucket, object_name, file_path)
+        self.hook.load_file(filename=file_path, key=object_name, bucket_name=bucket, replace=replace)
 
     def download_to_bytes(
             self, 
-            bucket: str, 
+            bucket: str,
             object_name: str
     )-> bytes:
-        with self.client.get_object(bucket, object_name) as response:
-            return response.read()
+        client = self.hook.get_conn()
+        response = client.get_object(Bucket=bucket, Key=object_name)
+        return response["Body"].read()
 
     def download_to_file(
             self, 
@@ -72,4 +57,5 @@ class MinioHook(BaseHook):
             object_name: str, 
             file_path: str
     ):
-        self.client.fget_object(bucket, object_name, file_path)
+        client = self.hook.get_conn()
+        client.download_file(bucket, object_name, file_path)
