@@ -73,7 +73,7 @@ def save_raw_data(
         # save raw data in minio
         try:
             filename = f"{clan_tag}/{context['dag_run'].start_date}/clan_info.json"
-            hook.upload_bytes("raw-data", object_name = filename, data = buffer, length=len(json_bytes), content_type='application/json')
+            hook.upload_bytes("raw-data", object_name = filename, data = buffer, put_kwargs = {"ContentLength": len(json_bytes), "ContentType": 'application/json'})
 
             for member in top_clans_member_info[clan_tag]:
                 member_tag, member_info = next(iter(member.items()))
@@ -82,7 +82,7 @@ def save_raw_data(
                 buffer = io.BytesIO(json_bytes)
 
                 filename = f"{clan_tag}/{context['dag_run'].start_date}/member_{member_tag}_info.json"
-                hook.upload_bytes("raw-data", object_name = filename, data = buffer, length=len(json_bytes), content_type='application/json')   
+                hook.upload_bytes("raw-data", object_name = filename, data = buffer, put_kwargs = {"ContentLength": len(json_bytes), "ContentType": 'application/json'})   
 
             logging.info(f"sucessfully upload info about clan with tag {clan_tag}")
         except Exception as e:
