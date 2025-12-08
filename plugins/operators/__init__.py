@@ -1,2 +1,0 @@
-from plugins.operators.minio_upload_operator import MinioUploadOperator
-from plugins.operators.minio_download_operator import MinioDownloadOperator
