@@ -47,6 +47,40 @@ class MongoHook(BaseHook):
         
         _id = col.insert_one(documents).inserted_id
         return str(_id)
+    
+    def upsert_if_changed(self, collection: str, documents, key="tag"):
+        col = self.db[collection]
+        updated_count = 0
+        inserted_count = 0
+        skipped_count = 0
+        
+        for doc in documents:
+            # Находим существующий документ по ключу
+            existing = col.find_one({key: doc[key]})
+            
+            if existing is None:
+                # Документ новый — вставляем
+                col.insert_one(doc)
+                inserted_count += 1
+                continue
+            
+            # Сравниваем документы, удаляя поле _id
+            existing_clean = {k: v for k, v in existing.items() if k != "_id"}
+            
+            # Если данные полностью совпадают — пропускаем
+            if existing_clean == doc:
+                skipped_count += 1
+                continue
+            
+            # Если данные отличаются — обновляем
+            col.insert_one(doc)
+            updated_count += 1
+
+        return {
+            "inserted": inserted_count,
+            "updated": updated_count,
+            "skipped": skipped_count
+        }
 
     def find(self, collection: str, query=None, projection=None):
         """Чтение документов"""

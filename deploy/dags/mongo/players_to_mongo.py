@@ -56,7 +56,7 @@ def insert_players_to_mongo(**context):
         raise ValueError("No data received from get_players")
     
     hook = MongoHook()
-    inserted_ids = hook.insert("players", data)
+    inserted_ids = hook.upsert_if_changed("players", data)
     print(f"Inserted documents: {inserted_ids}")
     return inserted_ids
 

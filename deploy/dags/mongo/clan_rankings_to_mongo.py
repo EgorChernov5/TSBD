@@ -16,7 +16,7 @@ def insert_clan_rankings_to_mongo(**context):
         raise ValueError("No data received from get_clan_rankings")
     
     hook = MongoHook()
-    inserted_ids = hook.insert("clan_rankings", data)
+    inserted_ids = hook.upsert_if_changed("clan_rankings", data)
     print(f"Inserted documents: {inserted_ids}")
     return inserted_ids
 

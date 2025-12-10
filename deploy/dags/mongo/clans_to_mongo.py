@@ -15,7 +15,7 @@ def get_clan_rankings_from_mongo():
     if not finded_ids:
         raise ValueError("No data received from clan_rankings")
     
-    clans = [clan['tag'] for clan in finded_ids]
+    clans = [clan['tag'] for clan in finded_ids][:10]
     return clans
 
 
@@ -57,7 +57,7 @@ def insert_clans_to_mongo(**context):
         raise ValueError("No data received from get_clans")
     
     hook = MongoHook()
-    inserted_ids = hook.insert("clans", data)
+    inserted_ids = hook.upsert_if_changed("clans", data)
     print(f"Inserted documents: {inserted_ids}")
     return inserted_ids
 
