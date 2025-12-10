@@ -1,14 +1,12 @@
-from datetime import timedelta
-
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.utils import timezone
+from airflow.sdk import timezone
 from airflow import DAG
 
 from plugins.utils import load_minio_raw_data, postprocess_minio_raw_data
 
 with DAG(
     dag_id="coc_minio_postprocess_data",
-    start_date=timezone.utcnow() - timedelta(days=1),
+    start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
     schedule=None,
     catchup=False,
 ) as dag:
