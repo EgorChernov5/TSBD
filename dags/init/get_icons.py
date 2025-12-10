@@ -1,13 +1,14 @@
-from datetime import datetime
+from datetime import timedelta
 
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.utils import timezone
 from airflow import DAG
 
 from plugins.utils import scrape_troop_images, upload_icons_to_minio
 
 with DAG(
     dag_id="coc_scrape_images",
-    start_date=datetime(2025, 11, 29, 8, 0, 0),
+    start_date=timezone.utcnow() - timedelta(days=1),
     schedule="@once",
     catchup=False,
 ) as dag:

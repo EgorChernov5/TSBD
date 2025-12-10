@@ -1,13 +1,14 @@
-from datetime import datetime
+from datetime import timedelta
 
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.utils import timezone
 from airflow import DAG
 
 from plugins.utils import fetch_metrics
 
 with DAG(
     dag_id="get_task_speed_metrics",
-    start_date=datetime(2025, 11, 29, 8, 0, 0),
+    start_date=timezone.utcnow() - timedelta(days=1),
     schedule="@daily",
     catchup=False,
 ) as dag:
