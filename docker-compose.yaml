@@ -11,6 +11,7 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     # Database
+    AIRFLOW_CONN_AIRFLOW_API: http://${_AIRFLOW_WWW_USER_USERNAME}:${_AIRFLOW_WWW_USER_PASSWORD}@airflow-apiserver:8080?extra={"verify_ssl":false}
     AIRFLOW_CONN_MINIO_S3: aws://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@localhost/?endpoint_url=http%3A%2F%2Fminio%3A9000&verify=False
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
