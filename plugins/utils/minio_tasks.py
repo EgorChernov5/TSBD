@@ -2,10 +2,8 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import tempfile
 import logging
-import json
 import copy
 import os
-import io
 
 from plugins.utils import get_location_info, get_top_n_clans, get_clan_info, get_player_info
 from plugins.hooks import MinioHook
@@ -22,12 +20,12 @@ def save_tmp_file(
     pq.write_table(table, tmp.name)
     tmp.close()
 
-    hook.upload_file("preprocessed-data", object_name, tmp.name)
+    hook.upload_file("raw-data", object_name, tmp.name)
 
     if os.path.exists(tmp.name):
         os.remove(tmp.name)
 
-# tasks
+# tasks before minio
 
 def get_raw_data(
     country_code: str = "RU",
@@ -58,36 +56,6 @@ def get_raw_data(
 
     return top_clans_info, top_clans_member_info
 
-def save_raw_data(
-    **context
-):
-    # create hook
-    hook = MinioHook()
-    # Get data from previous task
-    top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="get_raw_data")
-
-    for clan_tag, clan_info in top_clans_info.items():
-        json_bytes = json.dumps(clan_info, indent=2).encode("utf-8")
-        buffer = io.BytesIO(json_bytes)
-        
-        # save raw data in minio
-        try:
-            filename = f"{clan_tag}/{context['dag_run'].start_date}/clan_info.json"
-            hook.upload_bytes("raw-data", object_name = filename, data = buffer, put_kwargs = {"ContentLength": len(json_bytes), "ContentType": 'application/json'})
-
-            for member in top_clans_member_info[clan_tag]:
-                member_tag, member_info = next(iter(member.items()))
-
-                json_bytes = json.dumps(member_info, indent=2).encode("utf-8")
-                buffer = io.BytesIO(json_bytes)
-
-                filename = f"{clan_tag}/{context['dag_run'].start_date}/member_{member_tag}_info.json"
-                hook.upload_bytes("raw-data", object_name = filename, data = buffer, put_kwargs = {"ContentLength": len(json_bytes), "ContentType": 'application/json'})   
-
-            logging.info(f"sucessfully upload info about clan with tag {clan_tag}")
-        except Exception as e:
-            raise RuntimeError(f"cannot upload data to minio! error: {e}")
-
 def process_raw_data(
     **context
 ):
@@ -116,7 +84,7 @@ def process_raw_data(
         
     return top_clans_info_copy, top_clans_member_info_copy
 
-def save_processed_data(
+def save_raw_data(
     **context
 ):
     # create hook
@@ -137,3 +105,5 @@ def save_processed_data(
             logging.info(f"sucessfully process data for clan with tag {clan_tag}")
         except Exception as e:
             raise RuntimeError(f"cannot upload data to minio! error: {e}")
+        
+# tasks after minio
