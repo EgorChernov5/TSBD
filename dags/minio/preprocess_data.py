@@ -1,13 +1,15 @@
-from datetime import datetime
+from datetime import timedelta
 
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.utils import timezone
 from airflow import DAG
 
 from plugins.utils import get_raw_data, save_raw_data, process_raw_data
 
 with DAG(
     dag_id="coc_minio_preprocess_data",
-    start_date=datetime.now(),
+    start_date=timezone.utcnow() - timedelta(days=1),
     schedule="0 */6 * * *",
     catchup=False,
 ) as dag:
@@ -27,4 +29,11 @@ with DAG(
         python_callable=save_raw_data
     )
 
-    get_raw_data_task >> process_raw_data_task >> save_raw_data_task
+    trigger_postprocess_data_DAG_task = TriggerDagRunOperator(
+        task_id='trigger_postprocess_data_DAG',
+        trigger_dag_id='coc_minio_postprocess_data',
+        wait_for_completion=False
+    )
+
+    get_raw_data_task >> process_raw_data_task >> \
+    save_raw_data_task >> trigger_postprocess_data_DAG_task

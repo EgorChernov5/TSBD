@@ -1,14 +1,20 @@
 import pyarrow.parquet as pq
+from io import BytesIO
 import pyarrow as pa
 import tempfile
 import logging
 import copy
 import os
 
+
+import pandas as pd
+
 from plugins.utils import get_location_info, get_top_n_clans, get_clan_info, get_player_info
 from plugins.hooks import MinioHook
 
+# ------------------
 # useful methods
+# ------------------
 
 def save_tmp_file(
         hook,
@@ -25,11 +31,13 @@ def save_tmp_file(
     if os.path.exists(tmp.name):
         os.remove(tmp.name)
 
+# ------------------
 # tasks before minio
+# ------------------
 
 def get_raw_data(
     country_code: str = "RU",
-    top_n_clans: int = 1,
+    top_n_clans: int = 5,
     **context
 ):
     location_info = get_location_info(country_code)
@@ -105,5 +113,55 @@ def save_raw_data(
             logging.info(f"sucessfully process data for clan with tag {clan_tag}")
         except Exception as e:
             raise RuntimeError(f"cannot upload data to minio! error: {e}")
-        
+
+# ------------------
 # tasks after minio
+# ------------------
+
+def load_minio_raw_data(**context):
+    # create hook
+    hook = MinioHook()
+    bucket = "raw-data"
+
+    # iterate over all clans
+    out = {}
+    clans = hook.list_prefixes(bucket=bucket)
+    for clan_tag in clans:
+        logging.info(f"load data for clan with tag {clan_tag}")
+        # list all collections under clan
+        collections = hook.list_prefixes(bucket=bucket, prefix=f"{clan_tag}/")
+        if not collections:
+            continue
+
+        # get latest collection
+        collections_only = [c.split("/", 1)[1] for c in collections]
+        latest = max(collections_only)
+
+        # iterate over latest collection files
+        dfs = []
+        prefix = f"{clan_tag}/{latest}/"
+        files = hook.list_objects(bucket=bucket, prefix=prefix)
+        for file_key in files:
+            filename = file_key.split("/")[-1]
+            if filename.startswith("member"):
+                data = hook.download_to_bytes(bucket=bucket, object_name=file_key)
+                table = pq.read_table(BytesIO(data))
+                dfs.append(table.to_pandas())
+
+        if dfs:
+            out[clan_tag] = pd.concat(dfs, ignore_index=True)
+
+    return out
+
+def postprocess_minio_raw_data(**context):
+    # get data from minio
+    raw_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
+
+    results = {}
+    for clan_tag, df in raw_dict.items():
+        # change the sorting logic depending on your metric
+        best = df.sort_values("trophies", ascending=False).iloc[0]
+        results[clan_tag] = best[["name", "trophies"]].to_dict()
+        logging.info(f"successfully postprocess data for clan with tag {clan_tag}")
+
+    return results
