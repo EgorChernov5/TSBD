@@ -20,6 +20,36 @@ class MinioHook(BaseHook):
             self.log.info(f"Bucket '{bucket_name}' does not exist. Creating it...")
             self.hook.create_bucket(bucket_name=bucket_name)
 
+    def list_prefixes(
+            self, 
+            bucket: str, 
+            prefix: str = ""
+    ) -> list[str]:
+        client = self.hook.get_conn()
+        paginator = client.get_paginator('list_objects_v2')
+
+        prefixes = set()
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter='/'):
+            for p in page.get("CommonPrefixes", []):
+                prefixes.add(p["Prefix"].rstrip("/"))
+
+        return sorted(prefixes)
+
+    def list_objects(
+            self, 
+            bucket: str, 
+            prefix: str
+    ) -> list[str]:
+        client = self.hook.get_conn()
+        paginator = client.get_paginator('list_objects_v2')
+
+        keys = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+
+        return keys
+
     def upload_bytes(
         self,
         bucket: str,
