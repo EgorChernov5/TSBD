@@ -3,17 +3,14 @@ from io import BytesIO
 import pyarrow as pa
 import tempfile
 import logging
-import copy
 import os
-
 
 import pandas as pd
 
-from plugins.utils import get_location_info, get_top_n_clans, get_clan_info, get_player_info
 from plugins.hooks import MinioHook
 
 # ------------------
-# useful methods
+# tasks before minio
 # ------------------
 
 def save_tmp_file(
@@ -31,74 +28,13 @@ def save_tmp_file(
     if os.path.exists(tmp.name):
         os.remove(tmp.name)
 
-# ------------------
-# tasks before minio
-# ------------------
-
-def get_raw_data(
-    country_code: str = "RU",
-    top_n_clans: int = 5,
-    **context
-):
-    location_info = get_location_info(country_code)
-    if location_info is None:
-        raise ValueError(f"cannot find info about specified country using this code: {country_code}")
-
-    top_clans = get_top_n_clans(location_info[0], limit = top_n_clans)
-
-    top_clans_info = {}
-    top_clans_member_info = {}
-    for clan in top_clans:
-        clan_tag = clan["tag"]
-        clan_info = get_clan_info(clan_tag)
-
-        top_clans_info[clan_tag] = clan_info
-        top_clans_member_info[clan_tag] = []
-
-        for member in clan_info["memberList"]:
-            member_tag = member["tag"]
-            member_info = get_player_info(member_tag)
-            top_clans_member_info[clan_tag].append({member_tag: member_info})
-
-        logging.info(f"sucessfully get info about clan with tag {clan_tag}")
-
-    return top_clans_info, top_clans_member_info
-
-def process_raw_data(
-    **context
-):
-    # Get data from previous task
-    top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="get_raw_data")
-    top_clans_info_copy = copy.deepcopy(top_clans_info)
-    top_clans_member_info_copy = copy.deepcopy(top_clans_member_info)
-
-    clan_extra_topics = ["labels", "badgeUrls", "memberList"]
-    clan_member_extra_topics = ["clan", "labels"]
-    for clan_tag in top_clans_info_copy.keys():       
-        try:
-            # remove extra topics for clan
-            for extra_topic in clan_extra_topics:
-                top_clans_info_copy[clan_tag].pop(extra_topic)
-
-            # remove extra topics for clan members
-            for member in top_clans_member_info_copy[clan_tag]:
-                member_tag = next(iter(member.keys()))
-                for extra_topic in clan_member_extra_topics: 
-                    member[member_tag].pop(extra_topic)
-
-            logging.info(f"sucessfully removed extra data for clan with tag {clan_tag}")
-        except Exception as e:
-            raise RuntimeError(f"cannot upload data to minio! error: {e}")
-        
-    return top_clans_info_copy, top_clans_member_info_copy
-
-def save_raw_data(
+def save_minio_raw_data(
     **context
 ):
     # create hook
     hook = MinioHook()
     # Get data from previous task
-    top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="process_raw_data")
+    top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="preprocess_raw_data")
 
     for clan_tag, clan_info in top_clans_info.items():       
         try:

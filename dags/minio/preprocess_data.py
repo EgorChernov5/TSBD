@@ -3,7 +3,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import get_raw_data, save_raw_data, process_raw_data
+from plugins.utils import get_raw_data, preprocess_raw_data, save_minio_raw_data
 
 with DAG(
     dag_id="coc_minio_preprocess_data",
@@ -17,14 +17,14 @@ with DAG(
         python_callable=get_raw_data
     )
 
-    process_raw_data_task = PythonOperator(
-        task_id="process_raw_data",
-        python_callable=process_raw_data
+    preprocess_raw_data_task = PythonOperator(
+        task_id="preprocess_raw_data",
+        python_callable=preprocess_raw_data
     )
 
-    save_raw_data_task = PythonOperator(
-        task_id="save_raw_data",
-        python_callable=save_raw_data
+    save_minio_raw_data_task = PythonOperator(
+        task_id="save_minio_raw_data",
+        python_callable=save_minio_raw_data
     )
 
     trigger_postprocess_data_DAG_task = TriggerDagRunOperator(
@@ -33,5 +33,5 @@ with DAG(
         wait_for_completion=False
     )
 
-    get_raw_data_task >> process_raw_data_task >> \
-    save_raw_data_task >> trigger_postprocess_data_DAG_task
+    get_raw_data_task >> preprocess_raw_data_task >> \
+    save_minio_raw_data_task >> trigger_postprocess_data_DAG_task
