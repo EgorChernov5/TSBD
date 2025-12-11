@@ -10,3 +10,5 @@ fastparquet
 pyyaml
 
 beautifulsoup4
+
+apache-airflow-providers-mongo
