@@ -15,19 +15,14 @@ def save_postgres_raw_data(**context):
     top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="preprocess_raw_data")
     dag_run_date = context['dag_run'].start_date.date()
 
-    for clan_tag in top_clans_info:
-        for member in top_clans_member_info[clan_tag]:
-            member_tag, member_info = next(iter(member.items()))
-            member_info.pop('legendStatistics', None)
-
     # Create tables dynamically based on first record
     first_clan_tag, first_clan_info = next(iter(top_clans_info.items()))
     first_clan_info["clan_tag"] = first_clan_tag
     hook.create_table_from_record("clan", first_clan_info, primary_keys=["clan_tag"])
 
-    first_member_info = next(iter(top_clans_member_info[first_clan_tag][0].values()))
-    first_member_info.update({"clan_tag": first_clan_tag, "member_tag": "dummy"})
-    hook.create_table_from_record("clan_member", first_member_info, primary_keys=["clan_tag","member_tag"])
+    member_tag, member_info = next(iter(top_clans_member_info[first_clan_tag][0].items()))
+    member_info.update({"clan_tag": first_clan_tag, "member_tag": member_tag})
+    hook.create_table_from_record("clan_member", member_info, primary_keys=["clan_tag","member_tag"])
 
     # Insert data
     for clan_tag, clan_info in top_clans_info.items():

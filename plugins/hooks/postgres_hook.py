@@ -10,6 +10,7 @@ class PostgresDataHook(BaseHook):
     def __init__(self, postgres_conn_id: str = "postgres_default"):
         super().__init__()
         self.hook = PostgresHook(postgres_conn_id=postgres_conn_id)
+        self.table_keys = {}
 
     def create_table_from_record(
             self, 
@@ -28,15 +29,24 @@ class PostgresDataHook(BaseHook):
         }
 
         columns = []
-        for key, value in record.items():
-            sql_type = sql_type_map.get(type(value), "TEXT")
-            columns.append(f"{key.lower().strip()} {sql_type}")
+        keys = []
 
-        # Ensure run_date column exists for partitioning
+        # Normalize and map all record fields
+        for key, value in record.items():
+            key = key.lower().strip()
+            sql_type = sql_type_map.get(type(value), "TEXT")
+            columns.append(f"{key} {sql_type}")
+            keys.append(key)
+
+        # Add system field run_date (only as column, not user keys)
         if "run_date" not in record:
             columns.append("run_date DATE NOT NULL")
 
-        # Primary key
+        # Save table keys (only user fields, NOT run_date)
+        if table_name not in self.table_keys:
+            self.table_keys[table_name] = keys
+
+        # Primary key setup
         pk = ", ".join(primary_keys) if primary_keys else None
         pk_sql = f", PRIMARY KEY ({pk})" if pk else ""
 
@@ -62,29 +72,44 @@ class PostgresDataHook(BaseHook):
         records: Union[dict, List[dict]],
         run_date: Optional[date] = None
     ) -> None:
-        
+            
         if not isinstance(records, list):
             records = [records]
 
         insert_records = []
+
         for record in records:
-            r = {
-                k.lower().strip(): json.dumps(v) if isinstance(v, (dict, list)) else v
-                for k, v in record.items()
-            }
+
+            # Normalize user-provided keys
+            normalized = {k.lower().strip(): v for k, v in record.items()}
+
+            r = {}
+
+            # Ensure all expected columns exist
+            for col in self.table_keys[table]:
+                value = normalized.get(col)
+
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value)
+
+                r[col] = value
+
+            # Add run_date
             r["run_date"] = run_date
             insert_records.append(r)
 
         if not insert_records:
             return
 
-        keys = insert_records[0].keys()
+        # SQL 
+        keys = self.table_keys[table] + ["run_date"]
         columns = ", ".join(keys)
         placeholders = ", ".join([f"%({k})s" for k in keys])
         sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
 
         conn = self.hook.get_conn()
         cursor = conn.cursor()
+
         try:
             cursor.executemany(sql, insert_records)
             conn.commit()
