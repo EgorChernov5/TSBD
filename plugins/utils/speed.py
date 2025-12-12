@@ -61,4 +61,4 @@ def fetch_metrics(**context):
     )
 
     stats_dict = stats.to_dict(orient="records")
-    save_tmp_file(minio_hook, stats_dict, f"tasks_metric_{dag_start_date}")
+    save_tmp_file(minio_hook, stats_dict, f"tasks_metric_{dag_start_date}.json")
