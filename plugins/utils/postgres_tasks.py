@@ -91,3 +91,9 @@ def postprocess_postgres_raw_data(**context):
         logging.info(f"Postprocessed clan {clan_tag}")
 
     return results
+
+# ------------------
+# tasks after minio
+# ------------------
+def save_postgres_norm_data(**context):
+    hook = PostgresDataHook()

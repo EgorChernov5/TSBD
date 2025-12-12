@@ -101,3 +101,14 @@ def postprocess_minio_raw_data(**context):
         logging.info(f"successfully postprocess data for clan with tag {clan_tag}")
 
     return results
+
+# ------------------
+# tasks norm minio
+# ------------------
+
+def split_minio_raw_data(**context):
+    # get data from minio
+    raw_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
+
+def norm_minio_raw_data(**context):
+    pass
