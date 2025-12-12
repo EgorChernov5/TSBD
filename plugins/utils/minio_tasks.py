@@ -4,6 +4,7 @@ import pyarrow as pa
 import tempfile
 import logging
 import os
+import hashlib
 
 import pandas as pd
 
@@ -89,6 +90,41 @@ def load_minio_raw_data(**context):
 
     return out
 
+def load_minio_raw_clan_data(**context):
+    # create hook
+    hook = MinioHook()
+    bucket = "raw-data"
+
+    # iterate over all clans
+    out = {}
+    clans = hook.list_prefixes(bucket=bucket)
+    for clan_tag in clans:
+        logging.info(f"load data for clan with tag {clan_tag}")
+        # list all collections under clan
+        collections = hook.list_prefixes(bucket=bucket, prefix=f"{clan_tag}/")
+        if not collections:
+            continue
+
+        # get latest collection
+        collections_only = [c.split("/", 1)[1] for c in collections]
+        latest = max(collections_only)
+
+        # iterate over latest collection files
+        dfs = []
+        prefix = f"{clan_tag}/{latest}/"
+        files = hook.list_objects(bucket=bucket, prefix=prefix)
+        for file_key in files:
+            filename = file_key.split("/")[-1]
+            if filename.startswith("clan_info"):
+                data = hook.download_to_bytes(bucket=bucket, object_name=file_key)
+                table = pq.read_table(BytesIO(data))
+                dfs.append(table.to_pandas())
+
+        if dfs:
+            out[clan_tag] = pd.concat(dfs, ignore_index=True)
+
+    return out
+
 def postprocess_minio_raw_data(**context):
     # get data from minio
     raw_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
@@ -108,7 +144,60 @@ def postprocess_minio_raw_data(**context):
 
 def split_minio_raw_data(**context):
     # get data from minio
-    raw_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
+    raw_clans_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_clan_data")
+    raw_players_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
+
+    # Clans info
+    if raw_clans_dict is not None:
+        for clan_tag, raw_df in raw_clans_dict.items():
+            # Table clan
+            tag = clan_tag
+            name = raw_df['name']
+            members_count = raw_df['members']
+            war_wins_count = raw_df['warWins']
+            clan_level = raw_df['clanLevel']
+            clan_points = raw_df['clanPoints']
+            break
+
+    # Players info
+    if raw_players_dict is not None:
+        achievements = {}  # id, name
+        player_achievements = {}
+        for clan_tag, raw_df in raw_players_dict.items():
+            print(raw_df.columns)
+            for _, player in raw_df.iterrows():
+                # Table player
+                tag = player['tag']
+                tag_clan = clan_tag
+                name = player['name']
+                town_hall_level = player['townHallLevel']
+                id_league = player['league']
+                
+                # Table player_achievement
+                player_achievements[tag] = {
+                    'id_achievement': [],
+                    'progress': []
+                }
+                for achievement in player['achievements']:
+                    achievement_name = achievement['name']
+                    id_achievement = hashlib.sha256(str(achievement_name).encode()).hexdigest()
+                    progress = achievement['value']  # это progress?
+                    
+                    player_achievements[tag]['id_achievement'].append(id_achievement)
+                    player_achievements[tag]['progress'].append(progress)
+                    # Table Achievement
+                    achievements[id_achievement] = achievement_name
+
+                # Table player_camp
+
+                # Table item
+
+                # Table league
+
+                break
+            break
+        
+
 
 def norm_minio_raw_data(**context):
     pass

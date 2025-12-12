@@ -1,6 +1,6 @@
 from plugins.utils.parse_coc_wiki import scrape_troop_images, upload_icons_to_minio
 from plugins.utils.clash_of_clans_api import get_raw_data, preprocess_raw_data
-from plugins.utils.minio_tasks import save_minio_raw_data, load_minio_raw_data, postprocess_minio_raw_data, split_minio_raw_data, norm_minio_raw_data
+from plugins.utils.minio_tasks import save_minio_raw_data, load_minio_raw_data, postprocess_minio_raw_data, split_minio_raw_data, norm_minio_raw_data, load_minio_raw_clan_data
 from plugins.utils.mongodb_tasks import save_mongodb_raw_data, load_mongodb_raw_data, postprocess_mongodb_raw_data
 from plugins.utils.postgres_tasks import save_postgres_raw_data, load_postgres_raw_data, postprocess_postgres_raw_data, save_postgres_norm_data
 from plugins.utils.speed import fetch_metrics
