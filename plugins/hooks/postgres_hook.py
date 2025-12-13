@@ -71,7 +71,8 @@ class PostgresDataHook(BaseHook):
         for column, value in zip(columns, row):
             sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
             columns_sql.append(f"{column} {sql_type}")
-
+        
+        # columns_sql.append("run_date DATE NOT NULL")  # add system field run_date
         request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql});"
 
         # Create table
@@ -150,14 +151,23 @@ class PostgresDataHook(BaseHook):
             rows: List[Tuple],
             columns: Tuple[str]
         ):
-        self.hook.insert_rows(
-            table=table_name,
-            rows=rows,
-            target_fields=columns,
-            commit_every=0, # Commits all rows in one transaction
-            # For performance with large inserts, especially if using a compatible psycopg2 version:
-            # fast_executemany=True 
-        )
+        placeholders = ', '.join(['%s' for _ in range(len(columns))])
+        columns = ", ".join(columns)
+        request_sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+        print(request_sql)
+
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.executemany(request_sql, rows)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to insert into {table_name}: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
 
     def find(
         self,
