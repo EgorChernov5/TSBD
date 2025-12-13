@@ -17,10 +17,10 @@ with DAG(
         python_callable=load_minio_raw_data
     )
 
-    # load_minio_raw_clan_data_task = PythonOperator(
-    #     task_id="load_minio_raw_clan_data",
-    #     python_callable=load_minio_raw_clan_data
-    # )
+    load_minio_raw_clan_data_task = PythonOperator(
+        task_id="load_minio_raw_clan_data",
+        python_callable=load_minio_raw_clan_data
+    )
 
     split_minio_raw_data_task = PythonOperator(
         task_id="split_minio_raw_data",
@@ -41,5 +41,5 @@ with DAG(
     load_minio_raw_data_task >> split_minio_raw_data_task >>\
     norm_minio_raw_data_task >> save_postgres_norm_data_task
     # Clans
-    # load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
-    # norm_minio_raw_data_task >> save_postgres_norm_data_task
+    load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
+    norm_minio_raw_data_task >> save_postgres_norm_data_task
