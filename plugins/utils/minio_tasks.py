@@ -4,7 +4,6 @@ import pyarrow as pa
 import tempfile
 import logging
 import os
-import hashlib
 
 import pandas as pd
 
@@ -198,6 +197,7 @@ def split_minio_raw_data(**context):
     return clans, players, leagues, achievements, player_achievements, player_camps, items
 
 def norm_minio_raw_data(**context):
+    # dag_run_date = context['dag_run'].start_date.date()
     clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="split_minio_raw_data")
     
     # Norm clans
@@ -205,12 +205,16 @@ def norm_minio_raw_data(**context):
     for tag, data in clans.items():
         # tag, name, members_count, war_wins_count, clan_level, clan_points
         norm_clans.append((tag, data['name'], data['members_count'], data['war_wins_count'], data['clan_level'], data['clan_points']))
+
+    norm_clans = tools.delete_duplicates(norm_clans, ['tag'])
     
     # Norm players
     norm_players = [('tag', 'tag_clan', 'name', 'town_hall_level', 'id_league')]
     for tag, data in players.items():
         # tag, tag_clan, name, town_hall_level, id_league
         norm_players.append((tag, data['tag_clan'], data['name'], data['town_hall_level'], data['id_league']))
+
+    norm_players = tools.delete_duplicates(norm_players, ['tag'])
     
     # Norm leagues
     # id_leagues, league_name
@@ -218,11 +222,15 @@ def norm_minio_raw_data(**context):
     for id_league, name in leagues.items():
         norm_leagues.append((id_league, name))
     
+    norm_leagues = tools.delete_duplicates(norm_leagues, ['id_leagues'])
+    
     # Norm achievements
     norm_achievements = [('id_achievement', 'name', 'max_starts')]
     for id_achievement, data in achievements.items():
         # id_achievement, name, max_starts
         norm_achievements.append((id_achievement, data['name'], data['max_starts']))
+    
+    norm_achievements = tools.delete_duplicates(norm_achievements, ['id_achievement'])
     
     # Norm player_achievements
     norm_player_achievements = [('tag', 'id_achievement', 'stars')]
@@ -231,6 +239,8 @@ def norm_minio_raw_data(**context):
         for id_achievement, star in zip(data['id_achievement'], data['stars']):
             norm_player_achievements.append((tag, id_achievement, star))
     
+    norm_player_achievements = tools.delete_duplicates(norm_player_achievements, ['tag', 'id_achievement'])
+
     # TODO: add icon_link
     # Norm player_camps
     # norm_player_camps = [('tag', 'id_item', 'level', 'icon_link')]
@@ -240,11 +250,15 @@ def norm_minio_raw_data(**context):
         # for id_item, level, icon_link in zip(data['id_item'], data['level'], data['icon_link']):
         for id_item, level in zip(data['id_item'], data['level']):
             norm_player_camps.append((tag, id_item, level))
+
+    norm_player_camps = tools.delete_duplicates(norm_player_camps, ['tag', 'id_item'])
     
     # Norm items
     norm_items = [('id_item', 'name', 'item_type', 'village', 'max_level')]
     for id_item, data in items.items():
         # id_item, name, item_type, village, max_level
         norm_items.append((id_item, data['name'], data['item_type'], data['village'], data['max_level']))
+
+    norm_items = tools.delete_duplicates(norm_items, ['id_item'])
 
     return norm_clans, norm_players, norm_leagues, norm_achievements, norm_player_achievements, norm_player_camps, norm_items

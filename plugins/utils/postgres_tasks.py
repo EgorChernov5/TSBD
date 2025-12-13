@@ -3,6 +3,7 @@ import logging
 import pandas as pd
 
 from plugins.hooks import PostgresDataHook
+from plugins.utils.tools import apply_scd
 
 # ------------------
 # tasks before postgres
@@ -95,6 +96,21 @@ def postprocess_postgres_raw_data(**context):
 # ------------------
 # tasks after minio
 # ------------------
+# TODO: add SCD-2
+def scd_postgres_norm_data(**context):
+    hook = PostgresDataHook()
+
+    clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="norm_minio_raw_data")
+
+    apply_scd(
+        hook,
+        'dds_clan',
+        clans[0],
+        clans[1:],
+        ['tag'],
+        ['members_count', 'war_wins_count', 'clan_level', 'clan_points']
+    )
+
 
 def save_postgres_norm_data(**context):
     hook = PostgresDataHook()

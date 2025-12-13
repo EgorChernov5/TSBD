@@ -219,6 +219,114 @@ class PostgresDataHook(BaseHook):
             result.append(record)
 
         return result
+    
+    def find_changes(self, table_name, business_key_cols, tracked_cols, unique_bk_set):
+        # sql = """
+        # SELECT
+        #     s.CustomerBK,
+        #     s.Name,
+        #     s.City
+        # FROM StagingCustomer s
+        # LEFT JOIN DimCustomer d
+        #     ON s.CustomerBK = d.CustomerBK
+        #     AND d.IsCurrent = 'Y'
+        # WHERE
+        #     d.CustomerSK IS NULL  -- Новые клиенты
+        #     OR (
+        #         d.CustomerSK IS NOT NULL
+        #         AND (
+        #             ISNULL(s.Name, '') != ISNULL(d.Name, '')
+        #             OR ISNULL(s.City, '') != ISNULL(d.City, '')
+        #         )
+        #     );
+        # """
+
+        # === 2. Получаем текущие активные версии из БД ===
+        bk_col_list = ', '.join(business_key_cols)
+        tracked_col_list = ', '.join(tracked_cols)
+
+        placeholders = ', '.join(['%s'] * len(business_key_cols))
+        in_clause = ' OR '.join([f"({bk_col_list}) = ({placeholders})"] * len(unique_bk_set))
+
+        # TODO: change query
+        query = f"""
+            SELECT {bk_col_list}, {tracked_col_list}, customer_sk, version
+            FROM {table_name}
+            WHERE is_current = true
+            AND ({in_clause})
+        """
+
+        # "Выпрямляем" параметры для запроса: каждый business key — кортеж аргументов
+        query_params = []
+        for bk_tuple in unique_bk_set:
+            query_params.extend(bk_tuple)
+
+        conn = self.hook.get_conn()
+        with conn.cursor() as cur:
+            cur.execute(query, query_params)
+            current_rows = cur.fetchall()
+
+            return current_rows, bk_col_list
+
+    def update_sqd(
+            self,
+            table_name,
+            business_key_cols,
+            tracked_cols,
+            bk_col_list,
+            current_by_bk,
+            changed_or_new,
+            today,
+            end_date_sentinel
+        ):
+        # === 4. Закрываем текущие версии (UPDATE) ===
+        bk_to_close = [
+            tuple(rec[col] for col in business_key_cols)
+            for rec, _ in changed_or_new
+            if tuple(rec[col] for col in business_key_cols) in current_by_bk
+        ]
+
+        conn = self.hook.get_conn()
+        if bk_to_close:
+            placeholders = ', '.join(['%s'] * len(business_key_cols))
+            in_clause = ' OR '.join([f"({bk_col_list}) = ({placeholders})"] * len(bk_to_close))
+            update_query = f"""
+                UPDATE {table_name}
+                SET end_date = %s, is_current = false
+                WHERE is_current = true AND ({in_clause})
+            """
+            update_params = [today]
+            for bk in bk_to_close:
+                update_params.extend(bk)
+
+            with conn.cursor() as cur:
+                cur.execute(update_query, update_params)
+
+        # === 5. Вставляем новые версии (INSERT) ===
+        insert_cols = list(business_key_cols) + list(tracked_cols) + ['start_date', 'end_date', 'is_current', 'version']
+        insert_col_str = ', '.join(insert_cols)
+        placeholders = ', '.join(['%s'] * len(insert_cols))
+        insert_query = f"""
+            INSERT INTO {table_name} ({insert_col_str})
+            VALUES ({placeholders})
+        """
+
+        insert_values = []
+        for rec, version in changed_or_new:
+            row = (
+                *[rec[col] for col in business_key_cols],
+                *[rec[col] for col in tracked_cols],
+                today,
+                end_date_sentinel,
+                True,
+                version
+            )
+            insert_values.append(row)
+
+        with conn.cursor() as cur:
+            cur.executemany(insert_query, insert_values)
+
+        conn.commit()
 
     def delete(
         self,
