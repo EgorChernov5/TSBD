@@ -198,6 +198,8 @@ def split_minio_raw_data(**context):
 
 def norm_minio_raw_data(**context):
     # dag_run_date = context['dag_run'].start_date.date()
+    # start_date = 
+    # end_date = 
     clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="split_minio_raw_data")
     
     # Norm clans

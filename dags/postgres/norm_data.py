@@ -33,23 +33,23 @@ with DAG(
     )
 
     # TODO: add SCD-2
-    scd_postgres_norm_data_task = PythonOperator(
-        task_id="scd_postgres_norm_data",
-        python_callable=scd_postgres_norm_data
-    )
-
-    # save_postgres_norm_data_task = PythonOperator(
-    #     task_id="save_postgres_norm_data",
-    #     python_callable=save_postgres_norm_data
+    # scd_postgres_norm_data_task = PythonOperator(
+    #     task_id="scd_postgres_norm_data",
+    #     python_callable=scd_postgres_norm_data
     # )
+
+    save_postgres_norm_data_task = PythonOperator(
+        task_id="save_postgres_norm_data",
+        python_callable=save_postgres_norm_data
+    )
 
     # Players
     # load_minio_raw_data_task >> split_minio_raw_data_task >>\
     # norm_minio_raw_data_task >> save_postgres_norm_data_task
     # Clans
-    # load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
-    # norm_minio_raw_data_task >> save_postgres_norm_data_task
+    load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
+    norm_minio_raw_data_task >> save_postgres_norm_data_task
 
     # Temp
-    load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
-    norm_minio_raw_data_task >> scd_postgres_norm_data_task
+    # load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
+    # norm_minio_raw_data_task >> scd_postgres_norm_data_task

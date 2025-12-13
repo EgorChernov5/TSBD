@@ -100,13 +100,12 @@ def apply_scd(
     """
     # === 1. Преобразуем входные данные в список словарей для удобства ===
     new_records = [dict(zip(columns, row)) for row in new_rows]
-    print(new_records)
 
     # # Извлекаем значения business key для запроса
-    # bk_values = [tuple(rec[col] for col in business_key_cols) for rec in new_records]
+    bk_values = [tuple(rec[col] for col in business_key_cols) for rec in new_records]
     
-    # # Уникальные business keys
-    # unique_bk_set: Set[Tuple] = set(bk_values)
+    # Уникальные business keys
+    unique_bk_set: Set[Tuple] = set(bk_values)
 
     # # === 2. Получаем текущие активные версии из БД ===
     # current_rows, bk_col_list = hook.find_changes(table_name, business_key_cols, tracked_cols, unique_bk_set)

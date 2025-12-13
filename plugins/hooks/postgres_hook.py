@@ -62,18 +62,23 @@ class PostgresDataHook(BaseHook):
             table_name: str,
             columns: Tuple[str],
             row: Tuple[Any],
-            primary_keys: List[str]
+            primary_keys: List[str],
+            surrogate_key: Optional[str] = None
         ):
         # Define SQL request
         pk = ", ".join(primary_keys) if primary_keys else None
-        pk_sql = f", PRIMARY KEY ({pk})" if pk else ""
-        columns_sql = []
+        pk_sql = f", PRIMARY KEY ({pk})" if surrogate_key is None else ""
+        columns_sql = [f"{surrogate_key} INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"] if surrogate_key is not None else []
         for column, value in zip(columns, row):
             sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
+            if (column in primary_keys) and (surrogate_key is not None):
+                sql_type += ' NOT NULL UNIQUE'
+
             columns_sql.append(f"{column} {sql_type}")
-        
+                
         # columns_sql.append("run_date DATE NOT NULL")  # add system field run_date
         request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql});"
+        print(request_sql)
 
         # Create table
         conn = self.hook.get_conn()

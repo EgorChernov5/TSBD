@@ -1,3 +1,6 @@
+from datetime import date
+
+
 SQL_TYPE_MAP = {
     int: "INTEGER",
     float: "FLOAT",
@@ -6,4 +9,5 @@ SQL_TYPE_MAP = {
     dict: "JSONB",
     list: "JSONB",
     type(None): "TEXT",
+    date: "DATE NOT NULL"
 }
