@@ -95,5 +95,47 @@ def postprocess_postgres_raw_data(**context):
 # ------------------
 # tasks after minio
 # ------------------
+
 def save_postgres_norm_data(**context):
     hook = PostgresDataHook()
+
+    # Get data from previous task
+    clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="norm_minio_raw_data")
+    
+    # Init tables
+    clan_table = "dds_clan"
+    clan_columns = clans.pop(0)
+    hook.create_table_if_not_exists(clan_table, clan_columns, clans[0], primary_keys=["tag"])
+
+    player_table = "dds_player"
+    player_columns = players.pop(0)
+    hook.create_table_if_not_exists(player_table, player_columns, players[0], primary_keys=["tag"])
+
+    league_table = "dds_league"
+    league_columns = leagues.pop(0)
+    hook.create_table_if_not_exists(league_table, league_columns, leagues[0], primary_keys=["id_leagues"])
+
+    achievement_table = "dds_achievement"
+    achievement_columns = achievements.pop(0)
+    hook.create_table_if_not_exists(achievement_table, achievement_columns, achievements[0], primary_keys=["id_achievement"])
+
+    player_achievement_table = "dds_player_achievement"
+    player_achievement_columns = player_achievements.pop(0)
+    hook.create_table_if_not_exists(player_achievement_table, player_achievement_columns, player_achievements[0], primary_keys=["tag", "id_achievement"])
+
+    player_camp_table = "dds_player_camp"
+    player_camp_columns = player_camps.pop(0)
+    hook.create_table_if_not_exists(player_camp_table, player_camp_columns, player_camps[0], primary_keys=["tag", "id_item"])
+
+    item_table = "dds_item"
+    item_columns = items.pop(0)
+    hook.create_table_if_not_exists(item_table, item_columns, items[0], primary_keys=["id_item"])
+
+    # Insert data
+    hook.insert_norm_rows(clan_table, clans, clan_columns)
+    hook.insert_norm_rows(player_table, players, player_columns)
+    hook.insert_norm_rows(league_table, leagues, league_columns)
+    hook.insert_norm_rows(achievement_table, achievements, achievement_columns)
+    hook.insert_norm_rows(player_achievement_table, player_achievements, player_achievement_columns)
+    hook.insert_norm_rows(player_camp_table, player_camps, player_camp_columns)
+    hook.insert_norm_rows(item_table, items, item_columns)
