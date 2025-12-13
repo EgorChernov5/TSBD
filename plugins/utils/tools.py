@@ -1,6 +1,7 @@
 import hashlib
 
 
+# TODO: достижения у пользователя могут повторяться
 def parse_achievements(player, player_achievements, achievements):
     tag = player['tag']
     player_achievements[tag] = {
