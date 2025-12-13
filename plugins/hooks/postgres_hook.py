@@ -1,10 +1,11 @@
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Tuple, Dict, Any, Union, Optional
 from datetime import date
 import logging
 import json
 
 from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from plugins.utils.constants import SQL_TYPE_MAP
 
 class PostgresDataHook(BaseHook):
     def __init__(self, postgres_conn_id: str = "postgres_default"):
@@ -17,24 +18,14 @@ class PostgresDataHook(BaseHook):
             table_name: str, 
             record: dict, 
             primary_keys: Optional[List[str]] = None
-    ):
-        sql_type_map = {
-            int: "INTEGER",
-            float: "FLOAT",
-            str: "TEXT",
-            bool: "BOOLEAN",
-            dict: "JSONB",
-            list: "JSONB",
-            type(None): "TEXT",
-        }
-
+        ):
         columns = []
         keys = []
 
         # Normalize and map all record fields
         for key, value in record.items():
             key = key.lower().strip()
-            sql_type = sql_type_map.get(type(value), "TEXT")
+            sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
             columns.append(f"{key} {sql_type}")
             keys.append(key)
 
@@ -56,6 +47,38 @@ class PostgresDataHook(BaseHook):
         cursor = conn.cursor()
         try:
             cursor.execute(create_sql)
+            conn.commit()
+            logging.info(f"Table '{table_name}' created or already exists.")
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to create table {table_name}: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+    def create_table_if_not_exists(
+            self,
+            table_name: str,
+            columns: Tuple[str],
+            row: Tuple[Any],
+            primary_keys: List[str]
+        ):
+        # Define SQL request
+        pk = ", ".join(primary_keys) if primary_keys else None
+        pk_sql = f", PRIMARY KEY ({pk})" if pk else ""
+        columns_sql = []
+        for column, value in zip(columns, row):
+            sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
+            columns_sql.append(f"{column} {sql_type}")
+
+        request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql});"
+
+        # Create table
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(request_sql)
             conn.commit()
             logging.info(f"Table '{table_name}' created or already exists.")
         except Exception as e:
@@ -120,6 +143,21 @@ class PostgresDataHook(BaseHook):
         finally:
             cursor.close()
             conn.close()
+
+    def insert_norm_rows(
+            self,
+            table_name: str,
+            rows: List[Tuple],
+            columns: Tuple[str]
+        ):
+        self.hook.insert_rows(
+            table=table_name,
+            rows=rows,
+            target_fields=columns,
+            commit_every=0, # Commits all rows in one transaction
+            # For performance with large inserts, especially if using a compatible psycopg2 version:
+            # fast_executemany=True 
+        )
 
     def find(
         self,
