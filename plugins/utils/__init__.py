@@ -5,3 +5,4 @@ from plugins.utils.mongodb_tasks import save_mongodb_raw_data, load_mongodb_raw_
 from plugins.utils.postgres_tasks import save_postgres_raw_data, load_postgres_raw_data, postprocess_postgres_raw_data, save_postgres_norm_data, scd_postgres_norm_data
 from plugins.utils.speed import fetch_metrics
 from plugins.utils import constants
+from plugins.utils.data_quality_tasks import compare_data_size, check_anomalies, scd_validation

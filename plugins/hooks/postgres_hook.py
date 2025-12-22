@@ -13,6 +13,55 @@ class PostgresDataHook(BaseHook):
         self.hook = PostgresHook(postgres_conn_id=postgres_conn_id)
         self.table_keys = {}
 
+    def calculate_db_size(self) -> list[str]:
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT
+                    table_name,
+                    row_estimate,
+                    pg_total_relation_size(quote_ident(table_name)) AS total_bytes
+                FROM (
+                    SELECT
+                        table_name,
+                        (xpath('/row/cnt/text()', query_to_xml(format('SELECT COUNT(*) as cnt FROM %I', table_name), true, true, ''))[1]::text)::bigint AS row_estimate
+                    FROM information_schema.tables
+                    WHERE table_schema='public'
+                ) t;
+            """)
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to calculate db size: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+        tables_size = {}
+        for table_name, _, size_bytes in cursor.fetchall():
+            tables_size[table_name] = round(size_bytes / (1024 ** 2), 3)
+
+        return tables_size
+
+    def execute_query(
+            self,
+            query: str
+    ):
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query)
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to execute query: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+        return cursor
+
     def create_table_from_record(
             self, 
             table_name: str, 

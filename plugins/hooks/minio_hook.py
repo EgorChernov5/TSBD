@@ -49,6 +49,21 @@ class MinioHook(BaseHook):
                 keys.append(obj["Key"])
 
         return keys
+    
+    def calculate_objects_size(
+            self, 
+            bucket: str, 
+            prefix: str
+    ) -> list[str]:
+        client = self.hook.get_conn()
+        paginator = client.get_paginator('list_objects_v2')
+
+        total_size = 0.0
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                total_size += obj["Size"]
+
+        return round(total_size / (1024 ** 2), 3)
 
     def upload_bytes(
         self,
