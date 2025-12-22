@@ -1,10 +1,11 @@
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Tuple, Dict, Any, Union, Optional
 from datetime import date
 import logging
 import json
 
 from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from plugins.utils.constants import SQL_TYPE_MAP
 
 class PostgresDataHook(BaseHook):
     def __init__(self, postgres_conn_id: str = "postgres_default"):
@@ -17,24 +18,14 @@ class PostgresDataHook(BaseHook):
             table_name: str, 
             record: dict, 
             primary_keys: Optional[List[str]] = None
-    ):
-        sql_type_map = {
-            int: "INTEGER",
-            float: "FLOAT",
-            str: "TEXT",
-            bool: "BOOLEAN",
-            dict: "JSONB",
-            list: "JSONB",
-            type(None): "TEXT",
-        }
-
+        ):
         columns = []
         keys = []
 
         # Normalize and map all record fields
         for key, value in record.items():
             key = key.lower().strip()
-            sql_type = sql_type_map.get(type(value), "TEXT")
+            sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
             columns.append(f"{key} {sql_type}")
             keys.append(key)
 
@@ -56,6 +47,44 @@ class PostgresDataHook(BaseHook):
         cursor = conn.cursor()
         try:
             cursor.execute(create_sql)
+            conn.commit()
+            logging.info(f"Table '{table_name}' created or already exists.")
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to create table {table_name}: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+    def create_table_if_not_exists(
+            self,
+            table_name: str,
+            columns: Tuple[str],
+            row: Tuple[Any],
+            primary_keys: List[str],
+            surrogate_key: Optional[str] = None
+        ):
+        # Define SQL request
+        pk = ", ".join(primary_keys) if primary_keys else None
+        pk_sql = f", PRIMARY KEY ({pk})" if surrogate_key is None else ""
+        columns_sql = [f"{surrogate_key} INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"] if surrogate_key is not None else []
+        for column, value in zip(columns, row):
+            sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
+            if (column in primary_keys) and (surrogate_key is not None):
+                sql_type += ' NOT NULL UNIQUE'
+
+            columns_sql.append(f"{column} {sql_type}")
+                
+        # columns_sql.append("run_date DATE NOT NULL")  # add system field run_date
+        request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql});"
+        print(request_sql)
+
+        # Create table
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(request_sql)
             conn.commit()
             logging.info(f"Table '{table_name}' created or already exists.")
         except Exception as e:
@@ -121,6 +150,30 @@ class PostgresDataHook(BaseHook):
             cursor.close()
             conn.close()
 
+    def insert_norm_rows(
+            self,
+            table_name: str,
+            rows: List[Tuple],
+            columns: Tuple[str]
+        ):
+        placeholders = ', '.join(['%s' for _ in range(len(columns))])
+        columns = ", ".join(columns)
+        request_sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+        print(request_sql)
+
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.executemany(request_sql, rows)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to insert into {table_name}: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
     def find(
         self,
         table: str,
@@ -171,6 +224,114 @@ class PostgresDataHook(BaseHook):
             result.append(record)
 
         return result
+    
+    def find_changes(self, table_name, business_key_cols, tracked_cols, unique_bk_set):
+        # sql = """
+        # SELECT
+        #     s.CustomerBK,
+        #     s.Name,
+        #     s.City
+        # FROM StagingCustomer s
+        # LEFT JOIN DimCustomer d
+        #     ON s.CustomerBK = d.CustomerBK
+        #     AND d.IsCurrent = 'Y'
+        # WHERE
+        #     d.CustomerSK IS NULL  -- Новые клиенты
+        #     OR (
+        #         d.CustomerSK IS NOT NULL
+        #         AND (
+        #             ISNULL(s.Name, '') != ISNULL(d.Name, '')
+        #             OR ISNULL(s.City, '') != ISNULL(d.City, '')
+        #         )
+        #     );
+        # """
+
+        # === 2. Получаем текущие активные версии из БД ===
+        bk_col_list = ', '.join(business_key_cols)
+        tracked_col_list = ', '.join(tracked_cols)
+
+        placeholders = ', '.join(['%s'] * len(business_key_cols))
+        in_clause = ' OR '.join([f"({bk_col_list}) = ({placeholders})"] * len(unique_bk_set))
+
+        # TODO: change query
+        query = f"""
+            SELECT {bk_col_list}, {tracked_col_list}, customer_sk, version
+            FROM {table_name}
+            WHERE is_current = true
+            AND ({in_clause})
+        """
+
+        # "Выпрямляем" параметры для запроса: каждый business key — кортеж аргументов
+        query_params = []
+        for bk_tuple in unique_bk_set:
+            query_params.extend(bk_tuple)
+
+        conn = self.hook.get_conn()
+        with conn.cursor() as cur:
+            cur.execute(query, query_params)
+            current_rows = cur.fetchall()
+
+            return current_rows, bk_col_list
+
+    def update_sqd(
+            self,
+            table_name,
+            business_key_cols,
+            tracked_cols,
+            bk_col_list,
+            current_by_bk,
+            changed_or_new,
+            today,
+            end_date_sentinel
+        ):
+        # === 4. Закрываем текущие версии (UPDATE) ===
+        bk_to_close = [
+            tuple(rec[col] for col in business_key_cols)
+            for rec, _ in changed_or_new
+            if tuple(rec[col] for col in business_key_cols) in current_by_bk
+        ]
+
+        conn = self.hook.get_conn()
+        if bk_to_close:
+            placeholders = ', '.join(['%s'] * len(business_key_cols))
+            in_clause = ' OR '.join([f"({bk_col_list}) = ({placeholders})"] * len(bk_to_close))
+            update_query = f"""
+                UPDATE {table_name}
+                SET end_date = %s, is_current = false
+                WHERE is_current = true AND ({in_clause})
+            """
+            update_params = [today]
+            for bk in bk_to_close:
+                update_params.extend(bk)
+
+            with conn.cursor() as cur:
+                cur.execute(update_query, update_params)
+
+        # === 5. Вставляем новые версии (INSERT) ===
+        insert_cols = list(business_key_cols) + list(tracked_cols) + ['start_date', 'end_date', 'is_current', 'version']
+        insert_col_str = ', '.join(insert_cols)
+        placeholders = ', '.join(['%s'] * len(insert_cols))
+        insert_query = f"""
+            INSERT INTO {table_name} ({insert_col_str})
+            VALUES ({placeholders})
+        """
+
+        insert_values = []
+        for rec, version in changed_or_new:
+            row = (
+                *[rec[col] for col in business_key_cols],
+                *[rec[col] for col in tracked_cols],
+                today,
+                end_date_sentinel,
+                True,
+                version
+            )
+            insert_values.append(row)
+
+        with conn.cursor() as cur:
+            cur.executemany(insert_query, insert_values)
+
+        conn.commit()
 
     def delete(
         self,
