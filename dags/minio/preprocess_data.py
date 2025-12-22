@@ -27,11 +27,11 @@ with DAG(
         python_callable=save_minio_raw_data
     )
 
-    trigger_postprocess_data_DAG_task = TriggerDagRunOperator(
-        task_id='trigger_postprocess_data_DAG',
-        trigger_dag_id='coc_minio_postprocess_data',
-        wait_for_completion=False
-    )
+    #trigger_postprocess_data_DAG_task = TriggerDagRunOperator(
+    #    task_id='trigger_postprocess_data_DAG',
+    #    trigger_dag_id='coc_minio_postprocess_data',
+    #    wait_for_completion=False
+    #)
 
-    get_raw_data_task >> preprocess_raw_data_task >> \
-    save_minio_raw_data_task >> trigger_postprocess_data_DAG_task
+    get_raw_data_task >> preprocess_raw_data_task #>> \
+    #save_minio_raw_data_task >> trigger_postprocess_data_DAG_task
