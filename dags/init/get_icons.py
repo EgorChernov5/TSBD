@@ -2,7 +2,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import scrape_troop_images, upload_icons_to_minio
+from plugins.utils.parse_coc_wiki import scrape_troop_images, upload_icons_to_minio
 
 with DAG(
     dag_id="coc_scrape_images",

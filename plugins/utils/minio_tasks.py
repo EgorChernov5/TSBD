@@ -1,3 +1,4 @@
+from typing import List, Dict
 import pyarrow.parquet as pq
 from io import BytesIO
 import pyarrow as pa
@@ -14,38 +15,33 @@ from plugins.utils import tools
 # tasks before minio
 # ------------------
 
-def save_tmp_file(
-        hook,
-        data,
-        object_name
-):
-    table = pa.Table.from_pylist([data])
+def save_tmp_file(hook, bucket, data, object_name):
+    table = pa.Table.from_pylist([data]) if isinstance(data, dict) else  pa.Table.from_pylist(data)
     tmp = tempfile.NamedTemporaryFile(delete=False)
     pq.write_table(table, tmp.name)
     tmp.close()
 
-    hook.upload_file("raw-data", object_name, tmp.name)
+    hook.upload_file(bucket, object_name, tmp.name)
 
     if os.path.exists(tmp.name):
         os.remove(tmp.name)
 
-def save_minio_raw_data(
-    **context
-):
+def save_minio_raw_data(**context):
     # create hook
     hook = MinioHook()
+    bucket = "raw-data"
     # Get data from previous task
     top_clans_info, top_clans_member_info = context["ti"].xcom_pull(task_ids="preprocess_raw_data")
 
     for clan_tag, clan_info in top_clans_info.items():       
         try:
             filename = f"{clan_tag}/{context['dag_run'].start_date}/clan_info.parquet"
-            save_tmp_file(hook, clan_info, filename)
+            save_tmp_file(hook, bucket, clan_info, filename)
 
             for member in top_clans_member_info[clan_tag]:
                 member_tag, member_info = next(iter(member.items()))
                 filename = f"{clan_tag}/{context['dag_run'].start_date}/member_{member_tag}_info.parquet"
-                save_tmp_file(hook, member_info, filename)
+                save_tmp_file(hook, bucket, member_info, filename)
 
             logging.info(f"sucessfully process data for clan with tag {clan_tag}")
         except Exception as e:
@@ -142,48 +138,103 @@ def postprocess_minio_raw_data(**context):
 # tasks norm minio
 # ------------------
 
+def presettup(**context):
+    context["ti"].xcom_push(
+        key='table_names',
+        value=['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
+    )
+
+    # Table clan
+    context["ti"].xcom_push(
+        key="clans_target_fields",
+        value=['tag', 'name', 'members_count', 'war_wins_count', 'clan_level', 'clan_points']
+    )
+    context["ti"].xcom_push(key="clans_keys", value=['tag'])
+    # Table player
+    context["ti"].xcom_push(
+        key="players_target_fields",
+        value=['tag', 'tag_clan', 'name', 'town_hall_level', 'id_league']
+    )
+    context["ti"].xcom_push(key="players_keys", value=['tag'])
+    # Table league
+    context["ti"].xcom_push(
+        key="leagues_target_fields",
+        value=['id_leagues', 'league_name']
+    )
+    context["ti"].xcom_push(key="leagues_keys", value=['id_league'])
+    # Table achievement
+    context["ti"].xcom_push(
+        key="achievements_target_fields",
+        value=['id_achievement', 'name', 'max_starts']
+    )
+    context["ti"].xcom_push(key="achievements_keys", value=['id_achievement'])
+    # Table player_achievement
+    context["ti"].xcom_push(
+        key="player_achievements_target_fields",
+        value=['tag_player', 'id_achievement', 'stars']
+    )
+    context["ti"].xcom_push(key="player_achievements_keys", value=['tag_player', 'id_achievement'])
+    # Table player_camp
+    context["ti"].xcom_push(
+        key="player_camps_target_fields",
+        value=['tag_player', 'id_item', 'level']  # TODO: ['tag_player', 'id_item', 'level', 'icon_link']
+    )
+    context["ti"].xcom_push(key="player_camps_keys", value=['tag_player', 'id_item'])
+    # Table item
+    context["ti"].xcom_push(
+        key="items_target_fields",
+        value=['id_item', 'name', 'item_type', 'village', 'max_level']
+    )
+    context["ti"].xcom_push(key="items_keys", value=['id_item'])
+
 def split_minio_raw_data(**context):
     # Get data from minio
     raw_clans_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_clan_data")
     raw_players_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_data")
 
     # Clans info
-    clans = {}                  # tag, name, members_count, war_wins_count, clan_level, clan_points
+    clans: List[Dict] = []                  # tag, name, members_count, war_wins_count, clan_level, clan_points
     if raw_clans_dict is not None:
         for clan_tag, raw_df in raw_clans_dict.items():
             for _, clan in raw_df.iterrows():
                 # Table clan
-                clans[clan_tag] = {
+                clans.append({
+                    'tag': clan_tag,
                     'name': clan['name'],
                     'members_count': clan['members'],
                     'war_wins_count': clan['warWins'],
                     'clan_level': clan['clanLevel'],
                     'clan_points': clan['clanPoints']
-                }
-
+                })
+    
     # Players info
-    players = {}                # tag, tag_clan, name, town_hall_level, id_league
-    leagues = {}                # id_league, league_name
-    achievements = {}           # id_achievement, name, max_starts=3
-    player_achievements = {}    # tag, id_achievement, stars
-    player_camps = {}           # tag, id_item, level, icon_link
-    items = {}                  # id_item, name, item_type, village, max_level
+    players: List[Dict] = []                # tag, tag_clan, name, town_hall_level, id_league
+    leagues: List[Dict] = []                # id_league, name
+    achievements: List[Dict] = []           # id_achievement, name, max_starts=3
+    player_achievements: List[Dict] = []    # tag_player, id_achievement, stars
+    player_camps: List[Dict] = []           # tag_player, id_item, level, icon_link
+    items: List[Dict] = []                  # id_item, name, item_type, village, max_level
     if raw_players_dict is not None:
         for clan_tag, raw_df in raw_players_dict.items():
             for _, player in raw_df.iterrows():
                 # Table player
                 tag = player['tag']
-                id_league = player['league']['id'] if player['league'] is not None else None  # TODO: is it ok?
+                id_league = player['league']['id'] if player['league'] is not None else None
 
-                players[tag] = {
+                players.append({
+                    'tag': tag,
                     'tag_clan': clan_tag,
                     'name': player['name'],
                     'town_hall_level': player['townHallLevel'],
                     'id_league': id_league
-                }
+                })
 
                 # Table league
-                if id_league is not None: leagues[id_league] = player['league']['name']
+                if id_league is not None:
+                    leagues.append({
+                        'id_league': id_league,
+                        'name': player['league']['name']
+                    })
                 
                 # Table player_achievement, achievement
                 tools.parse_achievements(player, player_achievements, achievements)
@@ -197,70 +248,106 @@ def split_minio_raw_data(**context):
     return clans, players, leagues, achievements, player_achievements, player_camps, items
 
 def norm_minio_raw_data(**context):
-    # dag_run_date = context['dag_run'].start_date.date()
-    # start_date = 
-    # end_date = 
+    # type List[Tuple]
     clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="split_minio_raw_data")
     
     # Norm clans
-    norm_clans = [('tag', 'name', 'members_count', 'war_wins_count', 'clan_level', 'clan_points')]
-    for tag, data in clans.items():
-        # tag, name, members_count, war_wins_count, clan_level, clan_points
-        norm_clans.append((tag, data['name'], data['members_count'], data['war_wins_count'], data['clan_level'], data['clan_points']))
-
-    norm_clans = tools.delete_duplicates(norm_clans, ['tag'])
+    clans_keys = context["ti"].xcom_pull(task_ids="presettup", key="clans_keys")
+    norm_clans = tools.delete_duplicates( clans, clans_keys)
     
     # Norm players
-    norm_players = [('tag', 'tag_clan', 'name', 'town_hall_level', 'id_league')]
-    for tag, data in players.items():
-        # tag, tag_clan, name, town_hall_level, id_league
-        norm_players.append((tag, data['tag_clan'], data['name'], data['town_hall_level'], data['id_league']))
-
-    norm_players = tools.delete_duplicates(norm_players, ['tag'])
+    players_keys = context["ti"].xcom_pull(task_ids="presettup", key="players_keys")
+    norm_players = tools.delete_duplicates(players, players_keys)
     
     # Norm leagues
-    # id_leagues, league_name
-    norm_leagues = [('id_leagues', 'league_name')]
-    for id_league, name in leagues.items():
-        norm_leagues.append((id_league, name))
-    
-    norm_leagues = tools.delete_duplicates(norm_leagues, ['id_leagues'])
+    leagues_keys = context["ti"].xcom_pull(task_ids="presettup", key="leagues_keys")
+    norm_leagues = tools.delete_duplicates(leagues, leagues_keys)
     
     # Norm achievements
-    norm_achievements = [('id_achievement', 'name', 'max_starts')]
-    for id_achievement, data in achievements.items():
-        # id_achievement, name, max_starts
-        norm_achievements.append((id_achievement, data['name'], data['max_starts']))
-    
-    norm_achievements = tools.delete_duplicates(norm_achievements, ['id_achievement'])
-    
+    achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="achievements_keys")
+    norm_achievements = tools.delete_duplicates( achievements, achievements_keys)
+
     # Norm player_achievements
-    norm_player_achievements = [('tag', 'id_achievement', 'stars')]
-    for tag, data in player_achievements.items():
-        # tag, id_achievement, stars
-        for id_achievement, star in zip(data['id_achievement'], data['stars']):
-            norm_player_achievements.append((tag, id_achievement, star))
-    
-    norm_player_achievements = tools.delete_duplicates(norm_player_achievements, ['tag', 'id_achievement'])
+    player_achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_achievements_keys")
+    norm_player_achievements = tools.delete_duplicates( player_achievements, player_achievements_keys)
 
     # TODO: add icon_link
     # Norm player_camps
-    # norm_player_camps = [('tag', 'id_item', 'level', 'icon_link')]
-    norm_player_camps = [('tag', 'id_item', 'level')]
-    for tag, data in player_camps.items():
-        # tag, id_item, level, icon_link
-        # for id_item, level, icon_link in zip(data['id_item'], data['level'], data['icon_link']):
-        for id_item, level in zip(data['id_item'], data['level']):
-            norm_player_camps.append((tag, id_item, level))
-
-    norm_player_camps = tools.delete_duplicates(norm_player_camps, ['tag', 'id_item'])
+    player_camps_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_camps_keys")
+    norm_player_camps = tools.delete_duplicates( player_camps, player_camps_keys)
     
     # Norm items
-    norm_items = [('id_item', 'name', 'item_type', 'village', 'max_level')]
-    for id_item, data in items.items():
-        # id_item, name, item_type, village, max_level
-        norm_items.append((id_item, data['name'], data['item_type'], data['village'], data['max_level']))
-
-    norm_items = tools.delete_duplicates(norm_items, ['id_item'])
+    items_keys = context["ti"].xcom_pull(task_ids="presettup", key="items_keys")
+    norm_items = tools.delete_duplicates( items, items_keys)
 
     return norm_clans, norm_players, norm_leagues, norm_achievements, norm_player_achievements, norm_player_camps, norm_items
+
+def save_minio_norm_data(**context):
+    # create hook
+    hook = MinioHook()
+    bucket = "norm-data"
+
+    # Get metadata
+    table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
+    # Get data from previous task
+    new_tables_data = context["ti"].xcom_pull(task_ids="norm_minio_raw_data")
+
+    for table_name, new_data in zip(table_names, new_tables_data):
+        try:
+            filename = f"{context['dag_run'].start_date}/{table_name}_info.parquet"
+            save_tmp_file(hook, bucket, new_data, filename)
+
+            logging.info(f"sucessfully process data for {table_name} (count of changes: {len(new_data)})")
+        except Exception as e:
+            raise RuntimeError(f"cannot upload data to minio! error: {e}")
+
+# ------------------
+# tasks scd minio
+# ------------------
+
+def load_minio_norm_data(**context):
+    # create hook
+    hook = MinioHook()
+    bucket = "norm-data"
+
+    # iterate over all tables
+    ref_order = ['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
+    cur_order = []
+    tables_data = []
+    timestamps = hook.list_prefixes(bucket=bucket)
+    for path_file in hook.list_objects(bucket=bucket, prefix=f"{max(timestamps)}/"):
+        filename: str = path_file.split("/")[-1]
+        byte_data = hook.download_to_bytes(bucket=bucket, object_name=path_file)
+        table_data = pq.read_table(BytesIO(byte_data))
+        tables_data.append(table_data.to_pandas())
+        cur_order.append(filename.replace('_info.parquet', ''))
+        
+    return tools.order_list(ref_order, cur_order, tables_data)
+
+    # for clan_tag in clans:
+    #     logging.info(f"load data for clan with tag {clan_tag}")
+    #     # list all collections under clan
+    #     collections = hook.list_prefixes(bucket=bucket, prefix=f"{clan_tag}/")
+    #     if not collections:
+    #         continue
+
+    #     # get latest collection
+    #     collections_only = [c.split("/", 1)[1] for c in collections]
+        
+
+    #     # iterate over latest collection files
+    #     dfs = []
+    #     prefix = f"{clan_tag}/{latest}/"
+    #     files = hook.list_objects(bucket=bucket, prefix=prefix)
+    #     for file_key in files:
+    #         filename = file_key.split("/")[-1]
+    #         if filename.startswith("member"):
+    #             data = hook.download_to_bytes(bucket=bucket, object_name=file_key)
+    #             table = pq.read_table(BytesIO(data))
+    #             dfs.append(table.to_pandas())
+
+    #     if dfs:
+    #         out[clan_tag] = pd.concat(dfs, ignore_index=True)
+
+    # return out
+    # return clans, players, leagues, achievements, player_achievements, player_camps, items

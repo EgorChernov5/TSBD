@@ -2,7 +2,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import load_mongodb_raw_data, postprocess_mongodb_raw_data
+from plugins.utils.mongodb_tasks import load_mongodb_raw_data, postprocess_mongodb_raw_data
 
 with DAG(
     dag_id="coc_mongodb_postprocess_data",

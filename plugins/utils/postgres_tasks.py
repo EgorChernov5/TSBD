@@ -96,6 +96,108 @@ def postprocess_postgres_raw_data(**context):
 # ------------------
 # tasks after minio
 # ------------------
+
+def presettup(**context):
+    context["ti"].xcom_push(
+        key='table_names',
+        value=['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
+    )
+
+    # Table clan
+    context["ti"].xcom_push(
+        key="clans_target_fields",
+        value=['tag', 'name', 'members_count', 'war_wins_count', 'clan_level', 'clan_points']
+    )
+    context["ti"].xcom_push(key="clans_keys", value=['tag'])
+    # Table player
+    context["ti"].xcom_push(
+        key="players_target_fields",
+        value=['tag', 'tag_clan', 'name', 'town_hall_level', 'id_league']
+    )
+    context["ti"].xcom_push(key="players_keys", value=['tag'])
+    # Table league
+    context["ti"].xcom_push(
+        key="leagues_target_fields",
+        value=['id_leagues', 'league_name']
+    )
+    context["ti"].xcom_push(key="leagues_keys", value=['id_league'])
+    # Table achievement
+    context["ti"].xcom_push(
+        key="achievements_target_fields",
+        value=['id_achievement', 'name', 'max_starts']
+    )
+    context["ti"].xcom_push(key="achievements_keys", value=['id_achievement'])
+    # Table player_achievement
+    context["ti"].xcom_push(
+        key="player_achievements_target_fields",
+        value=['tag_player', 'id_achievement', 'stars']
+    )
+    context["ti"].xcom_push(key="player_achievements_keys", value=['tag_player', 'id_achievement'])
+    # Table player_camp
+    context["ti"].xcom_push(
+        key="player_camps_target_fields",
+        value=['tag_player', 'id_item', 'level']  # TODO: ['tag_player', 'id_item', 'level', 'icon_link']
+    )
+    context["ti"].xcom_push(key="player_camps_keys", value=['tag_player', 'id_item'])
+    # Table item
+    context["ti"].xcom_push(
+        key="items_target_fields",
+        value=['id_item', 'name', 'item_type', 'village', 'max_level']
+    )
+    context["ti"].xcom_push(key="items_keys", value=['id_item'])
+
+def load_postgres_sqd_data(**context):
+    pass
+
+def compare_scd_data(**context):
+    # Get metadata
+    table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
+    tables_target_fields = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
+        for table_name in table_names
+    ]
+    tables_keys = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_keys")
+        for table_name in table_names
+    ]
+    # Get old and new data
+    mid_data = context["ti"].xcom_pull(task_ids="load_minio_norm_data")
+    old_data = load_postgres_sqd_data()
+    # Compare data
+    new_data = []
+    for keys, target_fields, new_df, old_df in zip(tables_keys, tables_target_fields, mid_data, old_data):
+        merged_df= old_df.merge(
+            new_df,
+            on=keys,
+            how="outer",
+            suffixes=("_old", "_new"),
+            indicator=True
+        )
+        cols = [c for c in merged_df.columns if ('_old' in c) or ('_new' in c)]
+
+        new_rows = merged_df[merged_df["_merge"] == "right_only"]
+        both = merged_df[merged_df["_merge"] == "both"]
+        changed = both[
+            (both[[c for c in cols if '_old' in c]].values !=
+            both[[c for c in cols if '_new' in c]].values).any(axis=1)
+        ]
+        # Union
+        non_key_cols = [c for c in target_fields if c not in keys]
+        new_clean = new_rows[
+            keys + [c + "_new" for c in non_key_cols]
+        ].copy()
+        new_clean.columns = keys + list(non_key_cols)
+
+        changed_clean = changed[
+            keys + [c + "_new" for c in non_key_cols]
+        ].copy()
+        changed_clean.columns = keys + list(non_key_cols)
+        result = pd.concat([new_clean, changed_clean], ignore_index=True)
+        # Save
+        new_data.append([tuple(v) for v in result.values])
+
+    return new_data  # [clans, players, leagues, achievements, player_achievements, player_camps, items]
+
 # TODO: add SCD-2
 def scd_postgres_norm_data(**context):
     hook = PostgresDataHook()
@@ -110,7 +212,6 @@ def scd_postgres_norm_data(**context):
         ['tag'],
         ['members_count', 'war_wins_count', 'clan_level', 'clan_points']
     )
-
 
 def save_postgres_norm_data(**context):
     hook = PostgresDataHook()

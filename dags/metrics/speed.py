@@ -2,7 +2,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import fetch_metrics
+from plugins.utils.speed import fetch_metrics
 
 with DAG(
     dag_id="get_task_speed_metrics",

@@ -2,7 +2,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import load_postgres_raw_data, postprocess_postgres_raw_data
+from plugins.utils.postgres_tasks import load_postgres_raw_data, postprocess_postgres_raw_data
 
 with DAG(
     dag_id="coc_postgres_postprocess_data",

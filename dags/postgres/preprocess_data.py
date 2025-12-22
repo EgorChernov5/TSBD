@@ -3,7 +3,8 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import get_raw_data, preprocess_raw_data, save_postgres_raw_data
+from plugins.utils.clash_of_clans_api import get_raw_data, preprocess_raw_data
+from plugins.utils.postgres_tasks import save_postgres_raw_data
 
 with DAG(
     dag_id="coc_postgres_preprocess_data",

@@ -3,79 +3,96 @@ from typing import List, Tuple, Dict, Any, Set
 from datetime import date
 
 
-# TODO: достижения у пользователя могут повторяться
-def parse_achievements(player, player_achievements, achievements):
-    tag = player['tag']
-    player_achievements[tag] = {
-        'id_achievement': [],
-        'stars': []
-    }
+def parse_achievements(player, player_achievements: List[Dict], achievements: List[Dict]):
+    tag_player = player['tag']
     for achievement in player['achievements']:
         achievement_name = achievement['name']
         id_achievement = hashlib.sha256(achievement_name.encode()).hexdigest()
         stars = achievement['stars']
-        
-        player_achievements[tag]['id_achievement'].append(id_achievement)
-        player_achievements[tag]['stars'].append(stars)
+
+        # Table player_achievement
+        player_achievements.append({
+            'tag_player': tag_player,
+            'id_achievement': id_achievement,
+            'stars': stars
+        })
         # Table achievement
-        achievements[id_achievement] = {
+        achievements.append({
+            'id_achievement': id_achievement,
             'name': achievement_name,
             'max_starts': 3
-        }
+        })
 
 
-# TODO: add icon_link
-def parse_items(player, item_type, items, player_camps):
-    tag = player['tag']
-    player_camps[tag] = {
-        'id_item': [],
-        'level': [],
-        'icon_link': []
-    }
+def parse_items(player, item_type: str, items: List[Dict], player_camps: List[Dict]):
+    tag_player = player['tag']
     for camp_item in player[item_type]:
-        camp_item_name = camp_item['name']
-        id_camp_item = hashlib.sha256(camp_item_name.encode()).hexdigest()
+        item_name = camp_item['name']
+        id_item = hashlib.sha256(item_name.encode()).hexdigest()
         level = camp_item['level']
 
-        player_camps[tag]['id_item'].append(id_camp_item)
-        player_camps[tag]['level'].append(level)
-        # player_camps[tag]['icon_link'].append(stars)  # how to add?
-        
+        # Table player_camp
+        player_camps.append({
+            'tag_player': tag_player,
+            'id_item': id_item,
+            'level': level,
+            # 'icon_link': icon_link  # TODO: how to add?
+        })
         # Table item
-        village = camp_item['village']
-        max_level = camp_item['maxLevel']
-        items[id_camp_item] = {
-            'name': camp_item_name,
+        items.append({
+            'id_item': id_item,
+            'name': item_name,
             'item_type': item_type,
-            'village': village,
-            'max_level': max_level
-        }
+            'village': camp_item['village'],
+            'max_level': camp_item['maxLevel']
+        })
 
 
-def delete_duplicates(rows, primary_keys):
-    header = rows[0]
-    data_rows = rows[1:]
+# def delete_duplicates(target_fields: List[str], data_rows: List[Tuple], primary_keys: List[str]):
+#     # Проверим, что все primary_keys есть в заголовке
+#     for pk in primary_keys:
+#         if pk not in target_fields:
+#             raise ValueError(f"Primary key '{pk}' not found in header: {target_fields}")
 
-    # Проверим, что все primary_keys есть в заголовке
-    header_list = list(header)
-    for pk in primary_keys:
-        if pk not in header_list:
-            raise ValueError(f"Primary key '{pk}' not found in header: {header}")
+#     # Получаем индексы primary keys
+#     pk_indices = [target_fields.index(pk) for pk in primary_keys]
 
-    # Получаем индексы primary keys
-    pk_indices = [header_list.index(pk) for pk in primary_keys]
+#     seen = set()
+#     # unique_rows = [target_fields]  # Начинаем с заголовка
+#     unique_rows = []  # Начинаем с заголовка
 
+#     for row in data_rows:
+#         # Извлекаем значения по индексам primary keys
+#         pk_values = tuple(row[i] for i in pk_indices)
+#         if pk_values not in seen:
+#             seen.add(pk_values)
+#             unique_rows.append(row)
+
+#     return unique_rows
+def delete_duplicates(data_rows: List[Dict], keys: List[str]) -> List[Dict]:
     seen = set()
-    unique_rows = [header]  # Начинаем с заголовка
+    unique_data: List[Dict] = []
+    for data_row in data_rows:
+        # формируем кортеж значений по ключам
+        key_values = tuple(data_row[k] for k in keys)
+        if key_values not in seen:
+            seen.add(key_values)
+            unique_data.append(data_row)
+    
+    return unique_data
 
-    for row in data_rows:
-        # Извлекаем значения по индексам primary keys
-        pk_values = tuple(row[i] for i in pk_indices)
-        if pk_values not in seen:
-            seen.add(pk_values)
-            unique_rows.append(row)
 
-    return unique_rows
+def order_list(ref_order, cur_order, dfs):
+    # Создаём словарь с индексами правильного порядка
+    order_index = {key: i for i, key in enumerate(ref_order)}
+    # Сортировка датафреймов
+    sorted_dfs = [
+        df for _, df in sorted(
+            zip(cur_order, dfs),
+            key=lambda x: order_index[x[0]]
+        )
+    ]
+    return sorted_dfs
 
 
 def apply_scd(

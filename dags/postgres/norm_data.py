@@ -2,8 +2,8 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import load_minio_raw_data, split_minio_raw_data, norm_minio_raw_data, load_minio_raw_clan_data
-from plugins.utils import save_postgres_norm_data, scd_postgres_norm_data
+from plugins.utils.minio_tasks import load_minio_raw_data, split_minio_raw_data, norm_minio_raw_data, load_minio_raw_clan_data
+from plugins.utils.postgres_tasks import save_postgres_norm_data, scd_postgres_norm_data
 
 with DAG(
     dag_id="dds_postgres_norm_data",

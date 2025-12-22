@@ -2,7 +2,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import load_minio_raw_data, postprocess_minio_raw_data
+from plugins.utils.minio_tasks import load_minio_raw_data, postprocess_minio_raw_data
 
 with DAG(
     dag_id="coc_minio_postprocess_data",
