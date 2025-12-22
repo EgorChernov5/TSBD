@@ -7,6 +7,7 @@ from plugins.utils import get_raw_data, preprocess_raw_data, save_postgres_raw_d
 
 with DAG(
     dag_id="coc_postgres_preprocess_data",
+    is_paused_upon_creation=True,
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
     schedule="0 */6 * * *",
     catchup=False,
