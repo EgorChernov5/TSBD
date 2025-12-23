@@ -4,5 +4,10 @@ set -e
 # Check if database exists; if not, create it and grant privileges
 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tc "SELECT 1 FROM pg_database WHERE datname = '$CLAN_DB'" | grep -q 1 || psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE DATABASE \"$CLAN_DB\";"
 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "GRANT ALL PRIVILEGES ON DATABASE \"$CLAN_DB\" TO \"$POSTGRES_USER\";"
+
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tc "SELECT 1 FROM pg_database WHERE datname = '$SUPERSET_DB'" | grep -q 1 || psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE DATABASE \"$SUPERSET_DB\";"
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "GRANT ALL PRIVILEGES ON DATABASE \"$SUPERSET_DB\" TO \"$POSTGRES_USER\";"
+
+# install extension and create tables
 psql -U "$POSTGRES_USER" -d "$CLAN_DB" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 psql -U "$POSTGRES_USER" -d "$CLAN_DB" -f /docker-entrypoint-initdb.d/tables.sql

@@ -67,6 +67,27 @@ services:
       start_period: 5s
     restart: always
 
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    environment:
+      SUPERSET_ADMIN: ${SUPERSET_ADMIN}
+      SUPERSET_PASSWORD: ${SUPERSET_PASSWORD}
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CLAN_DB: ${CLAN_DB}
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${SUPERSET_DB}
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    command: /app/init_superset.sh
+    depends_on:
+      - postgres
+
   redis:
     image: redis:7.2-bookworm
     env_file:
@@ -258,5 +279,6 @@ services:
 
 volumes:
   postgres-db-volume:
+  superset_home:
   minio-data:
   mongo-data:
