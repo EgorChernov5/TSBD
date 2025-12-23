@@ -526,7 +526,6 @@ class PostgresDataHook(BaseHook):
 
                 # 4️⃣ Закрываем текущие активные версии только если данные изменились
                 pk_join = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
-                diff_cond = " OR ".join([f"t.{c} IS DISTINCT FROM s.{c}" for c in data_cols])
 
                 cur.execute(f"""
                     UPDATE {schema}.{table_name} t
@@ -534,10 +533,7 @@ class PostgresDataHook(BaseHook):
                     FROM tmp_scd s
                     WHERE {pk_join}
                     AND t.end_date = %s
-                    AND ({diff_cond})
                 """, (change_ts, max_date))
-
-                print(cur.fetchall())
 
                 # 5️⃣ Вставляем новые версии
                 cur.execute(f"""
