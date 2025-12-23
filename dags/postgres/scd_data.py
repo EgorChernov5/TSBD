@@ -11,19 +11,20 @@ from plugins.utils.settup_task import presettup
 with DAG(
     dag_id="postgres_scd_data",
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
-    schedule=None,
+    schedule="0 */6 * * *",
     catchup=False,
 ) as dag:
-    # wait_for_minio_norm_data = ExternalTaskSensor(
-    #     task_id="wait_for_minio_norm_data_dag",
-    #     external_dag_id="minio_norm_data",              # dag, который ждём
-    #     external_task_id='save_minio_norm_data',                          # None = ждать завершения всего DAG
-    #     allowed_states=[DagRunState.SUCCESS],
-    #     failed_states=[DagRunState.FAILED],
-    #     mode="reschedule",                              # важно, чтобы не жрал слот воркера
-    #     poke_interval=300,                              # проверка каждые 5 мин
-    #     timeout=60*60*6,                                # таймаут 6 часов
-    # )
+    wait_for_minio_norm_data = ExternalTaskSensor(
+        task_id="wait_for_minio_norm_data_dag",
+        external_dag_id="minio_norm_data",              # dag, который ждём
+        external_task_id='save_minio_norm_data',        # ждём завершения последней задачи
+        allowed_states=[DagRunState.SUCCESS],
+        failed_states=[DagRunState.FAILED],
+        mode="reschedule",                              # важно, чтобы не жрал слот воркера
+        poke_interval=20,                               # проверка каждые 20 сек
+        timeout=60*60*6,                                # таймаут 6 часов
+        execution_date_fn=lambda dt: dt,
+    )
 
     presettup_task = PythonOperator(
         task_id="presettup",
@@ -50,9 +51,9 @@ with DAG(
         python_callable=save_postgres_scd_data
     )
 
-    # wait_for_minio_norm_data >> presettup_task >>\
-    # [load_minio_norm_data_task, load_postgres_sqd_data_task] >>\
-    # compare_scd_data_task >> save_postgres_scd_data_task
-    presettup_task >>\
+    wait_for_minio_norm_data >> presettup_task >>\
     [load_minio_norm_data_task, load_postgres_sqd_data_task] >>\
     compare_scd_data_task >> save_postgres_scd_data_task
+    # presettup_task >>\
+    # [load_minio_norm_data_task, load_postgres_sqd_data_task] >>\
+    # compare_scd_data_task >> save_postgres_scd_data_task

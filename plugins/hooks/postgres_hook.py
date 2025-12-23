@@ -524,7 +524,7 @@ class PostgresDataHook(BaseHook):
                     values
                 )
 
-                # 4️⃣ Закрываем текущие активные версии только если данные изменились
+                # 4️⃣ Закрываем текущие активные версии
                 pk_join = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
 
                 cur.execute(f"""
@@ -554,8 +554,6 @@ class PostgresDataHook(BaseHook):
 
         finally:
             conn.close()
-
-
 
     def update_sqd(
             self,
