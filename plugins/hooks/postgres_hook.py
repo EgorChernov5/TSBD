@@ -1,10 +1,13 @@
-from typing import List, Tuple, Dict, Any, Union, Optional
+from typing import List, Tuple, Dict, Any, Union, Optional, Iterable
 from datetime import date
 import logging
 import json
+from psycopg2.extras import execute_values
+import pandas as pd
 
 from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+
 from plugins.utils.constants import SQL_TYPE_MAP
 
 class PostgresDataHook(BaseHook):
@@ -100,7 +103,7 @@ class PostgresDataHook(BaseHook):
         table: str,
         records: Union[dict, List[dict]],
         run_date: Optional[date] = None
-    ) -> None:
+        ) -> None:
             
         if not isinstance(records, list):
             records = [records]
@@ -150,28 +153,92 @@ class PostgresDataHook(BaseHook):
             cursor.close()
             conn.close()
 
-    def insert_norm_rows(
-            self,
-            table_name: str,
-            rows: List[Tuple],
-            columns: Tuple[str]
-        ):
-        placeholders = ', '.join(['%s' for _ in range(len(columns))])
-        columns = ", ".join(columns)
-        request_sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-        print(request_sql)
+    def insert_scd1_data(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        pk_cols: Iterable[str],
+        schema: str = "public"
+    ) -> None:
+        """
+        Insert only NEW SCD1 rows
+        """
+
+        if df.empty:
+            self.log.info("No rows to insert for SCD1 in %s", table_name)
+            return
+
+        cols = list(df.columns)
 
         conn = self.hook.get_conn()
-        cursor = conn.cursor()
         try:
-            cursor.executemany(request_sql, rows)
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    f"""
+                    INSERT INTO {schema}.{table_name} (
+                        {", ".join(cols)}
+                    )
+                    VALUES %s
+                    """,
+                    [tuple(row[c] for c in cols) for _, row in df.iterrows()]
+                )
+
             conn.commit()
-        except Exception as e:
+            self.log.info("Inserted %s new rows into %s", len(df), table_name)
+        except Exception:
             conn.rollback()
-            logging.error(f"Failed to insert into {table_name}: {e}")
+            self.log.exception("Insert new SCD1 data failed")
             raise
         finally:
-            cursor.close()
+            conn.close()
+    
+    def insert_scd2_data(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        change_ts,
+        schema: str = "public"
+    ) -> None:
+        """
+        Insert only NEW SCD2 rows
+        """
+
+        if df.empty:
+            self.log.info("No rows to insert for SCD2 in %s", table_name)
+            return
+
+        cols = list(df.columns)
+
+        conn = self.hook.get_conn()
+        try:
+            with conn.cursor() as cur:
+                values = [tuple(row[c] for c in cols) for _, row in df.iterrows()]
+
+                execute_values(
+                    cur,
+                    f"""
+                    INSERT INTO {schema}.{table_name} (
+                        {", ".join(cols)},
+                        start_date,
+                        end_date,
+                        is_current
+                    )
+                    VALUES %s
+                    """,
+                    [
+                        (*row, change_ts, None, True)
+                        for row in values
+                    ]
+                )
+
+            conn.commit()
+            self.log.info("Inserted %s new rows into %s", len(df), table_name)
+        except Exception:
+            conn.rollback()
+            self.log.exception("Insert new SCD2 data failed")
+            raise
+        finally:
             conn.close()
 
     def find(
@@ -180,7 +247,7 @@ class PostgresDataHook(BaseHook):
         run_date: Optional[date] = None,
         where: Optional[str] = None,
         params: Optional[dict] = None
-    ) -> List[Dict[str, Any]]:
+        ) -> List[Dict[str, Any]]:
         """
         Select records from table optionally filtered by run_date and additional WHERE clause.
         """
@@ -273,6 +340,160 @@ class PostgresDataHook(BaseHook):
 
             return current_rows, bk_col_list
 
+    def update_scd1_data(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        pk_cols: Iterable[str],
+        schema: str = "public"
+    ) -> None:
+        """
+        Update existing rows in SCD Type 1 table.
+        - df: DataFrame с новыми значениями для обновления
+        - table_name: имя таблицы
+        - pk_cols: составной ключ для поиска строк
+        """
+
+        if df.empty:
+            self.log.info("No rows to update for SCD1 in %s", table_name)
+            return
+
+        pk_cols = list(pk_cols)
+        data_cols = [c for c in df.columns if c not in pk_cols]
+
+        if not data_cols:
+            self.log.warning("No columns to update for SCD1 in %s", table_name)
+            return
+
+        conn = self.hook.get_conn()
+
+        try:
+            with conn.cursor() as cur:
+                # Формируем SET выражение
+                set_expr = ", ".join([f"{c} = %s" for c in data_cols])
+                where_expr = " AND ".join([f"{c} = %s" for c in pk_cols])
+
+                sql = f"""
+                    UPDATE {schema}.{table_name}
+                    SET {set_expr}
+                    WHERE {where_expr}
+                """
+
+                # Подготавливаем данные для execute_values
+                values_list = [
+                    [row[c] for c in data_cols] + [row[c] for c in pk_cols]
+                    for _, row in df.iterrows()
+                ]
+
+                # Выполняем пакетное обновление
+                execute_values(cur, sql, values_list, template=None, page_size=100)
+
+            conn.commit()
+            self.log.info("SCD1 update completed: %s rows", len(df))
+
+        except Exception:
+            conn.rollback()
+            self.log.exception("SCD1 update failed")
+            raise
+
+        finally:
+            conn.close()
+
+    def update_scd2_data(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        pk_cols: Iterable[str],
+        change_ts,
+        schema: str = "public"
+    ) -> None:
+        """
+        Close old versions and insert new versions for CHANGED rows
+        """
+
+        if df.empty:
+            self.log.info("No rows to update for SCD2 in %s", table_name)
+            return
+
+        pk_cols = list(pk_cols)
+        data_cols = [c for c in df.columns if c not in pk_cols]
+
+        conn = self.hook.get_conn()
+
+        try:
+            with conn.cursor() as cur:
+
+                # 1️⃣ temp table
+                cur.execute(f"""
+                    CREATE TEMP TABLE tmp_changed
+                    (LIKE {schema}.{table_name} INCLUDING DEFAULTS)
+                    ON COMMIT DROP;
+                """)
+
+                # 2️⃣ load df → temp
+                values = [
+                    tuple(row[c] for c in pk_cols + data_cols)
+                    for _, row in df.iterrows()
+                ]
+
+                execute_values(
+                    cur,
+                    f"""
+                    INSERT INTO tmp_changed (
+                        {", ".join(pk_cols + data_cols)}
+                    )
+                    VALUES %s
+                    """,
+                    values
+                )
+
+                # 3️⃣ close old rows
+                join_cond = " AND ".join(
+                    [f"t.{c} = s.{c}" for c in pk_cols]
+                )
+
+                cur.execute(f"""
+                    UPDATE {schema}.{table_name} t
+                    SET
+                        end_date = %s,
+                        is_current = FALSE
+                    FROM tmp_changed s
+                    WHERE
+                        {join_cond}
+                        AND t.is_current = TRUE;
+                """, (change_ts,))
+
+                # 4️⃣ insert new versions
+                cur.execute(f"""
+                    INSERT INTO {schema}.{table_name} (
+                        {", ".join(pk_cols + data_cols)},
+                        start_date,
+                        end_date,
+                        is_current
+                    )
+                    SELECT
+                        {", ".join(pk_cols + data_cols)},
+                        %s,
+                        NULL,
+                        TRUE
+                    FROM tmp_changed;
+                """, (change_ts,))
+
+            conn.commit()
+            self.log.info(
+                "Updated %s changed rows in %s",
+                len(df),
+                table_name
+            )
+
+        except Exception:
+            conn.rollback()
+            self.log.exception("Update SCD data failed")
+            raise
+
+        finally:
+            conn.close()
+
     def update_sqd(
             self,
             table_name,
@@ -339,7 +560,7 @@ class PostgresDataHook(BaseHook):
         run_date: Optional[date] = None,
         where: Optional[str] = None,
         params: Optional[dict] = None
-    ) -> int:
+        ) -> int:
         """
         Delete records from table filtered by run_date and optional WHERE clause.
         """

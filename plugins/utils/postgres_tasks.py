@@ -1,4 +1,5 @@
 import logging
+from typing import List
 
 import pandas as pd
 
@@ -147,7 +148,25 @@ def presettup(**context):
     context["ti"].xcom_push(key="items_keys", value=['id_item'])
 
 def load_postgres_sqd_data(**context):
-    pass
+    # Create hook
+    hook = PostgresDataHook()
+    # Get metadata
+    table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
+    tables_target_fields = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
+        for table_name in table_names
+    ]
+    # Iterate over all tables
+    tables_data = []
+    for table_name, target_fields in zip(table_names, tables_target_fields):
+        data = hook.find(table_name, run_date=None)
+        if len(data) == 0:
+            tables_data.append(pd.DataFrame(columns=target_fields))
+        else:
+            tables_data.append(pd.DataFrame(data))
+    
+    # clans, players, leagues, achievements, player_achievements, player_camps, items
+    return tables_data
 
 def compare_scd_data(**context):
     # Get metadata
@@ -161,10 +180,11 @@ def compare_scd_data(**context):
         for table_name in table_names
     ]
     # Get old and new data
-    mid_data = context["ti"].xcom_pull(task_ids="load_minio_norm_data")
-    old_data = load_postgres_sqd_data()
+    mid_data: List[pd.DataFrame] = context["ti"].xcom_pull(task_ids="load_minio_norm_data")
+    old_data: List[pd.DataFrame] = context["ti"].xcom_pull(task_ids="load_postgres_sqd_data")
     # Compare data
     new_data = []
+    changed_data = []
     for keys, target_fields, new_df, old_df in zip(tables_keys, tables_target_fields, mid_data, old_data):
         merged_df= old_df.merge(
             new_df,
@@ -173,30 +193,100 @@ def compare_scd_data(**context):
             suffixes=("_old", "_new"),
             indicator=True
         )
-        cols = [c for c in merged_df.columns if ('_old' in c) or ('_new' in c)]
-
         new_rows = merged_df[merged_df["_merge"] == "right_only"]
         both = merged_df[merged_df["_merge"] == "both"]
-        changed = both[
-            (both[[c for c in cols if '_old' in c]].values !=
-            both[[c for c in cols if '_new' in c]].values).any(axis=1)
+        changed_rows = both[
+            (both[[c for c in merged_df.columns if '_old' in c]].values !=
+            both[[c for c in merged_df.columns if '_new' in c]].values).any(axis=1)
         ]
-        # Union
+        # New data
         non_key_cols = [c for c in target_fields if c not in keys]
         new_clean = new_rows[
             keys + [c + "_new" for c in non_key_cols]
         ].copy()
         new_clean.columns = keys + list(non_key_cols)
-
-        changed_clean = changed[
+        new_data.append(new_clean)
+        # Changed data
+        changed_clean = changed_rows[
             keys + [c + "_new" for c in non_key_cols]
         ].copy()
         changed_clean.columns = keys + list(non_key_cols)
-        result = pd.concat([new_clean, changed_clean], ignore_index=True)
-        # Save
-        new_data.append([tuple(v) for v in result.values])
+        changed_data.append(changed_clean)
 
-    return new_data  # [clans, players, leagues, achievements, player_achievements, player_camps, items]
+    # [clans, players, leagues, achievements, player_achievements, player_camps, items]
+    return new_data, changed_data
+
+def save_postgres_scd_data(**context):
+    hook = PostgresDataHook()
+
+    # Get metadata
+    table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
+    tables_target_fields = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
+        for table_name in table_names
+    ]
+    tables_keys = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_keys")
+        for table_name in table_names
+    ]
+    # Get data
+    new_data, changed_data = context["ti"].xcom_pull(task_ids="compare_scd_data")
+
+    # Close changed data
+    for name, target_fields, keys, df in zip(table_names, tables_target_fields, tables_keys, changed_data):
+        if df.empty:
+            continue
+
+        table_name = f"dim_{name}"
+        if name in ['clans', 'players']:
+            # SCD-2
+            hook.update_scd2_data(
+                df=df,
+                table_name=f"dim_{name}",
+                change_ts="2024-02-01 12:00:00",
+                pk_cols=["client_id", "date"]
+            )
+        else:
+            # SCD-1
+            hook.update_scd1_data(
+                df=df,
+                table_name=f"dim_{name}",
+                pk_cols=["client_id", "date"]
+            )
+
+    # Add new data
+    for name, target_fields, keys, df in zip(table_names, tables_target_fields, tables_keys, new_data):
+        if df.empty:
+            continue
+        
+        table_name = f"dim_{name}"
+        if name in ['clans', 'players']:
+            # SCD-2
+            hook.create_table_if_not_exists(
+                table_name,
+                target_fields + ["start_date", "end_date", "is_current"],
+                tuple(df.values[0]) + (None, None, True),  # TODO: fix types
+                keys,
+                'id_sk'
+            )
+            hook.insert_scd2_data(
+                df=df,
+                table_name=table_name,
+                change_ts="2024-02-01 12:00:00"
+            )
+        else:
+            # SCD-1
+            hook.create_table_if_not_exists(
+                table_name,
+                target_fields,
+                tuple(df.values[0]),
+                keys
+            )
+            hook.insert_scd1_data(
+                df=df,
+                table_name=table_name,
+                pk_cols=keys
+            )
 
 # TODO: add SCD-2
 def scd_postgres_norm_data(**context):
@@ -249,7 +339,7 @@ def save_postgres_norm_data(**context):
     # hook.create_table_if_not_exists(item_table, item_columns, items[0], primary_keys=["id_item"])
 
     # Insert data
-    hook.insert_norm_rows(clan_table, clans, clan_columns)
+    # hook.insert_norm_rows(clan_table, clans, clan_columns)
     # hook.insert_norm_rows(player_table, players, player_columns)
     # hook.insert_norm_rows(league_table, leagues, league_columns)
     # hook.insert_norm_rows(achievement_table, achievements, achievement_columns)

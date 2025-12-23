@@ -4,6 +4,7 @@ from airflow import DAG
 from airflow.sensors.external_task import ExternalTaskSensor
 
 from plugins.utils.minio_tasks import load_minio_norm_data
+from plugins.utils.postgres_tasks import presettup, load_postgres_sqd_data, save_postgres_scd_data
 
 with DAG(
     dag_id="postgres_scd_data",
@@ -22,9 +23,24 @@ with DAG(
     #     timeout=60*60*6,                                # таймаут 6 часов
     # )
 
+    presettup_task = PythonOperator(
+        task_id="presettup",
+        python_callable=presettup
+    )
+
     load_minio_norm_data_task = PythonOperator(
         task_id='load_minio_norm_data',
         python_callable=load_minio_norm_data
+    )
+
+    load_postgres_sqd_data_task = PythonOperator(
+        task_id='load_postgres_sqd_data',
+        python_callable=load_postgres_sqd_data
+    )
+
+    save_postgres_scd_data_task = PythonOperator(
+        task_id='save_postgres_scd_data',
+        python_callable=save_postgres_scd_data
     )
 
     # TODO: add SCD
@@ -33,4 +49,6 @@ with DAG(
     #     python_callable=scd_postgres_norm_data
     # )
 
-    load_minio_norm_data_task
+    presettup_task >>\
+    [load_minio_norm_data_task, load_postgres_sqd_data_task] >>\
+    save_postgres_scd_data_task

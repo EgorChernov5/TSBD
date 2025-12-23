@@ -24,12 +24,17 @@ with DAG(
     wait_for_coc_minio_data = ExternalTaskSensor(
         task_id="wait_for_coc_minio_data_dag",
         external_dag_id="coc_minio_preprocess_data",    # dag, который ждём
-        external_task_id=None,                          # None = ждать завершения всего DAG
+        external_task_id="save_minio_raw_data",         # ждём завершения последней задачи
         allowed_states=["success"],
         failed_states=["failed"],
         mode="reschedule",                              # важно, чтобы не жрал слот воркера
         poke_interval=60*5,                              # проверка каждые 5 мин
         timeout=60*60*6,                                # таймаут 6 часов
+    )
+
+    presettup_task = PythonOperator(
+        task_id="presettup",
+        python_callable=presettup
     )
 
     load_minio_raw_data_task = PythonOperator(
@@ -40,11 +45,6 @@ with DAG(
     load_minio_raw_clan_data_task = PythonOperator(
         task_id="load_minio_raw_clan_data",
         python_callable=load_minio_raw_clan_data
-    )
-
-    presettup_task = PythonOperator(
-        task_id="presettup",
-        python_callable=presettup
     )
 
     split_minio_raw_data_task = PythonOperator(
@@ -62,11 +62,9 @@ with DAG(
         python_callable=save_minio_norm_data
     )
 
-    # Players
-    wait_for_coc_minio_data >> load_minio_raw_data_task >> presettup_task >>\
-    split_minio_raw_data_task >> norm_minio_raw_data_task >>\
-    save_minio_norm_data_task
-    # Clans
-    wait_for_coc_minio_data >> load_minio_raw_clan_data_task >> presettup_task >>\
+    # wait_for_coc_minio_data >> presettup_task >> [load_minio_raw_clan_data_task, load_minio_raw_data_task] >>\
+    # split_minio_raw_data_task >> norm_minio_raw_data_task >>\
+    # save_minio_norm_data_task
+    presettup_task >> [load_minio_raw_clan_data_task, load_minio_raw_data_task] >>\
     split_minio_raw_data_task >> norm_minio_raw_data_task >>\
     save_minio_norm_data_task

@@ -306,48 +306,32 @@ def save_minio_norm_data(**context):
 # ------------------
 
 def load_minio_norm_data(**context):
-    # create hook
+    # Create hook
     hook = MinioHook()
     bucket = "norm-data"
-
-    # iterate over all tables
-    ref_order = ['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
-    cur_order = []
+    print(1111)
+    timestamps = hook.list_prefixes(bucket='bucket')
+    print(2222)
+    # Get metadata
+    table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
+    tables_target_fields = [
+        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
+        for table_name in table_names
+    ]
+    # Iterate over all tables
     tables_data = []
-    timestamps = hook.list_prefixes(bucket=bucket)
-    for path_file in hook.list_objects(bucket=bucket, prefix=f"{max(timestamps)}/"):
-        filename: str = path_file.split("/")[-1]
+    try:
+        timestamps = hook.list_prefixes(bucket=bucket)
+    except:
+        logging.info(f"there is no data in the {bucket}")
+        return [pd.DataFrame(columns=target_fields) for target_fields in tables_target_fields]
+
+    for table_name in table_names:
+        path_file = f'{max(timestamps)}/{table_name}_info.parquet'
+        print(path_file)
         byte_data = hook.download_to_bytes(bucket=bucket, object_name=path_file)
         table_data = pq.read_table(BytesIO(byte_data))
         tables_data.append(table_data.to_pandas())
-        cur_order.append(filename.replace('_info.parquet', ''))
         
-    return tools.order_list(ref_order, cur_order, tables_data)
-
-    # for clan_tag in clans:
-    #     logging.info(f"load data for clan with tag {clan_tag}")
-    #     # list all collections under clan
-    #     collections = hook.list_prefixes(bucket=bucket, prefix=f"{clan_tag}/")
-    #     if not collections:
-    #         continue
-
-    #     # get latest collection
-    #     collections_only = [c.split("/", 1)[1] for c in collections]
-        
-
-    #     # iterate over latest collection files
-    #     dfs = []
-    #     prefix = f"{clan_tag}/{latest}/"
-    #     files = hook.list_objects(bucket=bucket, prefix=prefix)
-    #     for file_key in files:
-    #         filename = file_key.split("/")[-1]
-    #         if filename.startswith("member"):
-    #             data = hook.download_to_bytes(bucket=bucket, object_name=file_key)
-    #             table = pq.read_table(BytesIO(data))
-    #             dfs.append(table.to_pandas())
-
-    #     if dfs:
-    #         out[clan_tag] = pd.concat(dfs, ignore_index=True)
-
-    # return out
-    # return clans, players, leagues, achievements, player_achievements, player_camps, items
+    # clans, players, leagues, achievements, player_achievements, player_camps, items
+    return tables_data
