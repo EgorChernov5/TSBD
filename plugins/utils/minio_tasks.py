@@ -309,9 +309,7 @@ def load_minio_norm_data(**context):
     # Create hook
     hook = MinioHook()
     bucket = "norm-data"
-    print(1111)
-    timestamps = hook.list_prefixes(bucket='bucket')
-    print(2222)
+    timestamps = hook.list_prefixes(bucket=bucket)
     # Get metadata
     table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
     tables_target_fields = [
