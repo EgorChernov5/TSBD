@@ -3,7 +3,7 @@ from airflow.sdk import timezone
 from airflow import DAG
 
 from plugins.utils.minio_tasks import load_minio_raw_data, split_minio_raw_data, norm_minio_raw_data, load_minio_raw_clan_data
-from plugins.utils.postgres_tasks import save_postgres_norm_data, scd_postgres_norm_data
+# from plugins.utils.postgres_tasks import save_postgres_norm_data, scd_postgres_norm_data
 
 with DAG(
     dag_id="dds_postgres_norm_data",
@@ -38,17 +38,17 @@ with DAG(
     #     python_callable=scd_postgres_norm_data
     # )
 
-    save_postgres_norm_data_task = PythonOperator(
-        task_id="save_postgres_norm_data",
-        python_callable=save_postgres_norm_data
-    )
+    # save_postgres_norm_data_task = PythonOperator(
+    #     task_id="save_postgres_norm_data",
+    #     python_callable=save_postgres_norm_data
+    # )
 
     # Players
     # load_minio_raw_data_task >> split_minio_raw_data_task >>\
     # norm_minio_raw_data_task >> save_postgres_norm_data_task
     # Clans
     load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\
-    norm_minio_raw_data_task >> save_postgres_norm_data_task
+    norm_minio_raw_data_task # >> save_postgres_norm_data_task
 
     # Temp
     # load_minio_raw_clan_data_task >> split_minio_raw_data_task >>\

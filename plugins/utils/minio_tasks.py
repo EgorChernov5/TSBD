@@ -138,55 +138,6 @@ def postprocess_minio_raw_data(**context):
 # tasks norm minio
 # ------------------
 
-def presettup(**context):
-    context["ti"].xcom_push(
-        key='table_names',
-        value=['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
-    )
-
-    # Table clan
-    context["ti"].xcom_push(
-        key="clans_target_fields",
-        value=['tag', 'name', 'members_count', 'war_wins_count', 'clan_level', 'clan_points']
-    )
-    context["ti"].xcom_push(key="clans_keys", value=['tag'])
-    # Table player
-    context["ti"].xcom_push(
-        key="players_target_fields",
-        value=['tag', 'tag_clan', 'name', 'town_hall_level', 'id_league']
-    )
-    context["ti"].xcom_push(key="players_keys", value=['tag'])
-    # Table league
-    context["ti"].xcom_push(
-        key="leagues_target_fields",
-        value=['id_leagues', 'league_name']
-    )
-    context["ti"].xcom_push(key="leagues_keys", value=['id_league'])
-    # Table achievement
-    context["ti"].xcom_push(
-        key="achievements_target_fields",
-        value=['id_achievement', 'name', 'max_starts']
-    )
-    context["ti"].xcom_push(key="achievements_keys", value=['id_achievement'])
-    # Table player_achievement
-    context["ti"].xcom_push(
-        key="player_achievements_target_fields",
-        value=['tag_player', 'id_achievement', 'stars']
-    )
-    context["ti"].xcom_push(key="player_achievements_keys", value=['tag_player', 'id_achievement'])
-    # Table player_camp
-    context["ti"].xcom_push(
-        key="player_camps_target_fields",
-        value=['tag_player', 'id_item', 'level']  # TODO: ['tag_player', 'id_item', 'level', 'icon_link']
-    )
-    context["ti"].xcom_push(key="player_camps_keys", value=['tag_player', 'id_item'])
-    # Table item
-    context["ti"].xcom_push(
-        key="items_target_fields",
-        value=['id_item', 'name', 'item_type', 'village', 'max_level']
-    )
-    context["ti"].xcom_push(key="items_keys", value=['id_item'])
-
 def split_minio_raw_data(**context):
     # Get data from minio
     raw_clans_dict = context["ti"].xcom_pull(task_ids="load_minio_raw_clan_data")
@@ -202,7 +153,7 @@ def split_minio_raw_data(**context):
                     'tag': clan_tag,
                     'name': clan['name'],
                     'members_count': clan['members'],
-                    'war_wins_count': clan['warWins'],
+                    'war_wins': clan['warWins'],
                     'clan_level': clan['clanLevel'],
                     'clan_points': clan['clanPoints']
                 })
@@ -223,16 +174,16 @@ def split_minio_raw_data(**context):
 
                 players.append({
                     'tag': tag,
-                    'tag_clan': clan_tag,
                     'name': player['name'],
-                    'town_hall_level': player['townHallLevel'],
-                    'id_league': id_league
+                    'townhall_level': player['townHallLevel'],
+                    'clan_id': clan_tag,
+                    'league_id': id_league
                 })
 
                 # Table league
                 if id_league is not None:
                     leagues.append({
-                        'id_league': id_league,
+                        'id': id_league,
                         'name': player['league']['name']
                     })
                 
@@ -252,32 +203,32 @@ def norm_minio_raw_data(**context):
     clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="split_minio_raw_data")
     
     # Norm clans
-    clans_keys = context["ti"].xcom_pull(task_ids="presettup", key="clans_keys")
+    clans_keys = context["ti"].xcom_pull(task_ids="presettup", key="clan_keys")
     norm_clans = tools.delete_duplicates( clans, clans_keys)
     
     # Norm players
-    players_keys = context["ti"].xcom_pull(task_ids="presettup", key="players_keys")
+    players_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_keys")
     norm_players = tools.delete_duplicates(players, players_keys)
     
     # Norm leagues
-    leagues_keys = context["ti"].xcom_pull(task_ids="presettup", key="leagues_keys")
+    leagues_keys = context["ti"].xcom_pull(task_ids="presettup", key="league_keys")
     norm_leagues = tools.delete_duplicates(leagues, leagues_keys)
     
     # Norm achievements
-    achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="achievements_keys")
+    achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="achievement_keys")
     norm_achievements = tools.delete_duplicates( achievements, achievements_keys)
 
     # Norm player_achievements
-    player_achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_achievements_keys")
+    player_achievements_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_achievement_keys")
     norm_player_achievements = tools.delete_duplicates( player_achievements, player_achievements_keys)
 
     # TODO: add icon_link
     # Norm player_camps
-    player_camps_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_camps_keys")
+    player_camps_keys = context["ti"].xcom_pull(task_ids="presettup", key="player_camp_keys")
     norm_player_camps = tools.delete_duplicates( player_camps, player_camps_keys)
     
     # Norm items
-    items_keys = context["ti"].xcom_pull(task_ids="presettup", key="items_keys")
+    items_keys = context["ti"].xcom_pull(task_ids="presettup", key="item_keys")
     norm_items = tools.delete_duplicates( items, items_keys)
 
     return norm_clans, norm_players, norm_leagues, norm_achievements, norm_player_achievements, norm_player_camps, norm_items

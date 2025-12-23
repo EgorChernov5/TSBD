@@ -1,4 +1,5 @@
 from typing import List, Tuple, Dict, Any, Union, Optional, Iterable
+from datetime import datetime, timezone
 from datetime import date
 import logging
 import json
@@ -8,7 +9,7 @@ import pandas as pd
 from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
-from plugins.utils.constants import SQL_TYPE_MAP
+from plugins.utils.constants import SQL_TYPE_MAP, map_python_to_sql_type
 
 class PostgresDataHook(BaseHook):
     def __init__(self, postgres_conn_id: str = "postgres_default"):
@@ -115,24 +116,44 @@ class PostgresDataHook(BaseHook):
             columns: Tuple[str],
             row: Tuple[Any],
             primary_keys: List[str],
-            surrogate_key: Optional[str] = None
+            surrogate_key: Optional[str] = None,
+            unique_constraints: Optional[List[Tuple[str, ...]]] = None
         ):
-        # Define SQL request
-        pk = ", ".join(primary_keys) if primary_keys else None
-        pk_sql = f", PRIMARY KEY ({pk})" if surrogate_key is None else ""
-        columns_sql = [f"{surrogate_key} INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"] if surrogate_key is not None else []
-        for column, value in zip(columns, row):
-            sql_type = SQL_TYPE_MAP.get(type(value), "TEXT")
-            if (column in primary_keys) and (surrogate_key is not None):
-                sql_type += ' NOT NULL UNIQUE'
+        """
+        Создаёт таблицу с возможностью суррогатного ключа и уникальных ограничений.
+        
+        unique_constraints: список кортежей, например: [('tag', 'start_date')]
+        """
+        columns_sql = []
 
+        # 1️⃣ Суррогатный ключ
+        if surrogate_key is not None:
+            columns_sql.append(f"{surrogate_key} INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY")
+
+        # 2️⃣ Основные колонки
+        for column, value in zip(columns, row):
+            sql_type = map_python_to_sql_type(value)
+            # Если колонка входит в primary_keys, можно добавить NOT NULL
+            if column in primary_keys:
+                sql_type += ' NOT NULL'
             columns_sql.append(f"{column} {sql_type}")
-                
-        # columns_sql.append("run_date DATE NOT NULL")  # add system field run_date
-        request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql});"
+
+        # 3️⃣ PRIMARY KEY если суррогатного нет
+        pk_sql = f", PRIMARY KEY ({', '.join(primary_keys)})" if surrogate_key is None and primary_keys else ""
+
+        # 4️⃣ UNIQUE ограничения
+        unique_sql = ""
+        if unique_constraints:
+            unique_parts = []
+            for uc in unique_constraints:
+                unique_parts.append(f"UNIQUE ({', '.join(uc)})")
+            unique_sql = ", " + ", ".join(unique_parts)
+
+        # 5️⃣ Собираем SQL
+        request_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)}{pk_sql}{unique_sql});"
         print(request_sql)
 
-        # Create table
+        # 6️⃣ Выполняем SQL
         conn = self.hook.get_conn()
         cursor = conn.cursor()
         try:
@@ -208,7 +229,7 @@ class PostgresDataHook(BaseHook):
         table_name: str,
         pk_cols: Iterable[str],
         schema: str = "public"
-    ) -> None:
+        ) -> None:
         """
         Insert only NEW SCD1 rows
         """
@@ -230,7 +251,7 @@ class PostgresDataHook(BaseHook):
                     )
                     VALUES %s
                     """,
-                    [tuple(row[c] for c in cols) for _, row in df.iterrows()]
+                    [tuple(v) for v in df.values]
                 )
 
             conn.commit()
@@ -248,10 +269,11 @@ class PostgresDataHook(BaseHook):
         table_name: str,
         change_ts,
         schema: str = "public"
-    ) -> None:
+        ) -> None:
         """
         Insert only NEW SCD2 rows
         """
+        max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
 
         if df.empty:
             self.log.info("No rows to insert for SCD2 in %s", table_name)
@@ -262,7 +284,7 @@ class PostgresDataHook(BaseHook):
         conn = self.hook.get_conn()
         try:
             with conn.cursor() as cur:
-                values = [tuple(row[c] for c in cols) for _, row in df.iterrows()]
+                values = [tuple(v) for v in df.values]
 
                 execute_values(
                     cur,
@@ -270,13 +292,12 @@ class PostgresDataHook(BaseHook):
                     INSERT INTO {schema}.{table_name} (
                         {", ".join(cols)},
                         start_date,
-                        end_date,
-                        is_current
+                        end_date
                     )
                     VALUES %s
                     """,
                     [
-                        (*row, change_ts, None, True)
+                        (*row, change_ts, max_date)
                         for row in values
                     ]
                 )
@@ -395,7 +416,7 @@ class PostgresDataHook(BaseHook):
         table_name: str,
         pk_cols: Iterable[str],
         schema: str = "public"
-    ) -> None:
+        ) -> None:
         """
         Update existing rows in SCD Type 1 table.
         - df: DataFrame с новыми значениями для обновления
@@ -449,99 +470,96 @@ class PostgresDataHook(BaseHook):
             conn.close()
 
     def update_scd2_data(
-        self,
-        df: pd.DataFrame,
-        table_name: str,
-        pk_cols: Iterable[str],
-        change_ts,
-        schema: str = "public"
-    ) -> None:
+            self,
+            df: pd.DataFrame,
+            table_name: str,
+            pk_cols: list,
+            change_ts,
+            schema: str = "public"
+        ) -> None:
         """
-        Close old versions and insert new versions for CHANGED rows
+        SCD Type 2 update:
+        - closes old versions
+        - inserts new versions with new surrogate keys
         """
+        max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
 
         if df.empty:
             self.log.info("No rows to update for SCD2 in %s", table_name)
             return
 
-        pk_cols = list(pk_cols)
-        data_cols = [c for c in df.columns if c not in pk_cols]
+        # Атрибуты, исключаем surrogate и SCD поля
+        scd_cols = {"id", "start_date", "end_date"}
+        data_cols = [c for c in df.columns if c not in pk_cols and c not in scd_cols]
+        all_cols = pk_cols + data_cols  # только бизнес-ключи + данные
 
         conn = self.hook.get_conn()
 
         try:
             with conn.cursor() as cur:
 
-                # 1️⃣ temp table
+                # 1️⃣ Создаём temp-таблицу с нужной структурой
                 cur.execute(f"""
-                    CREATE TEMP TABLE tmp_changed
-                    (LIKE {schema}.{table_name} INCLUDING DEFAULTS)
-                    ON COMMIT DROP;
+                    CREATE TEMP TABLE tmp_scd (
+                        LIKE {schema}.{table_name}
+                        EXCLUDING CONSTRAINTS
+                        EXCLUDING DEFAULTS
+                    ) ON COMMIT DROP;
                 """)
 
-                # 2️⃣ load df → temp
-                values = [
-                    tuple(row[c] for c in pk_cols + data_cols)
-                    for _, row in df.iterrows()
-                ]
+                # 2️⃣ Удаляем лишние колонки (id, start_date, end_date)
+                for col in scd_cols:
+                    cur.execute(f'ALTER TABLE tmp_scd DROP COLUMN IF EXISTS "{col}" CASCADE;')
+
+                # 3️⃣ Загружаем DataFrame в temp через execute_values
+                # Конвертируем даты и числа в подходящие типы
+                values = [tuple(v) for v in df.values]
 
                 execute_values(
                     cur,
                     f"""
-                    INSERT INTO tmp_changed (
-                        {", ".join(pk_cols + data_cols)}
-                    )
+                    INSERT INTO tmp_scd ({', '.join(all_cols)})
                     VALUES %s
                     """,
                     values
                 )
 
-                # 3️⃣ close old rows
-                join_cond = " AND ".join(
-                    [f"t.{c} = s.{c}" for c in pk_cols]
-                )
+                # 4️⃣ Закрываем текущие активные версии только если данные изменились
+                pk_join = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
+                diff_cond = " OR ".join([f"t.{c} IS DISTINCT FROM s.{c}" for c in data_cols])
 
                 cur.execute(f"""
                     UPDATE {schema}.{table_name} t
-                    SET
-                        end_date = %s,
-                        is_current = FALSE
-                    FROM tmp_changed s
-                    WHERE
-                        {join_cond}
-                        AND t.is_current = TRUE;
-                """, (change_ts,))
+                    SET end_date = %s
+                    FROM tmp_scd s
+                    WHERE {pk_join}
+                    AND t.end_date = %s
+                    AND ({diff_cond})
+                """, (change_ts, max_date))
 
-                # 4️⃣ insert new versions
+                print(cur.fetchall())
+
+                # 5️⃣ Вставляем новые версии
                 cur.execute(f"""
                     INSERT INTO {schema}.{table_name} (
-                        {", ".join(pk_cols + data_cols)},
-                        start_date,
-                        end_date,
-                        is_current
+                        {', '.join(all_cols)}, start_date, end_date
                     )
-                    SELECT
-                        {", ".join(pk_cols + data_cols)},
-                        %s,
-                        NULL,
-                        TRUE
-                    FROM tmp_changed;
-                """, (change_ts,))
+                    SELECT {', '.join([f"s.{c}" for c in all_cols])}, %s, %s
+                    FROM tmp_scd s
+                """, (change_ts, max_date))
 
             conn.commit()
-            self.log.info(
-                "Updated %s changed rows in %s",
-                len(df),
-                table_name
-            )
+            self.log.info("SCD2 upsert completed for %s (%s rows)", table_name, len(df))
 
         except Exception:
             conn.rollback()
-            self.log.exception("Update SCD data failed")
+            self.log.exception("SCD2 upsert failed")
             raise
 
         finally:
             conn.close()
+
+
 
     def update_sqd(
             self,

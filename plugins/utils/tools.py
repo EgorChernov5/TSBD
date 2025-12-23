@@ -12,15 +12,15 @@ def parse_achievements(player, player_achievements: List[Dict], achievements: Li
 
         # Table player_achievement
         player_achievements.append({
-            'tag_player': tag_player,
-            'id_achievement': id_achievement,
-            'stars': stars
+            'achievement_id': id_achievement,
+            'player_id': tag_player,
+            'progress': stars
         })
         # Table achievement
         achievements.append({
-            'id_achievement': id_achievement,
+            'id': id_achievement,
             'name': achievement_name,
-            'max_starts': 3
+            'max_progress': 3
         })
 
 
@@ -33,42 +33,21 @@ def parse_items(player, item_type: str, items: List[Dict], player_camps: List[Di
 
         # Table player_camp
         player_camps.append({
-            'tag_player': tag_player,
-            'id_item': id_item,
+            'player_id': tag_player,
+            'item_id': id_item,
             'level': level,
-            # 'icon_link': icon_link  # TODO: how to add?
+            'icon_link': 'icon_link'  # TODO: how to add?
         })
         # Table item
         items.append({
-            'id_item': id_item,
+            'id': id_item,
             'name': item_name,
-            'item_type': item_type,
+            'type': item_type,
             'village': camp_item['village'],
             'max_level': camp_item['maxLevel']
         })
 
 
-# def delete_duplicates(target_fields: List[str], data_rows: List[Tuple], primary_keys: List[str]):
-#     # Проверим, что все primary_keys есть в заголовке
-#     for pk in primary_keys:
-#         if pk not in target_fields:
-#             raise ValueError(f"Primary key '{pk}' not found in header: {target_fields}")
-
-#     # Получаем индексы primary keys
-#     pk_indices = [target_fields.index(pk) for pk in primary_keys]
-
-#     seen = set()
-#     # unique_rows = [target_fields]  # Начинаем с заголовка
-#     unique_rows = []  # Начинаем с заголовка
-
-#     for row in data_rows:
-#         # Извлекаем значения по индексам primary keys
-#         pk_values = tuple(row[i] for i in pk_indices)
-#         if pk_values not in seen:
-#             seen.add(pk_values)
-#             unique_rows.append(row)
-
-#     return unique_rows
 def delete_duplicates(data_rows: List[Dict], keys: List[str]) -> List[Dict]:
     seen = set()
     unique_data: List[Dict] = []

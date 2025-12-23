@@ -4,7 +4,7 @@ from airflow.utils.state import DagRunState
 from airflow.sdk import timezone
 from airflow import DAG
 
-from plugins.utils import compare_data_size, check_anomalies, scd_validation
+from plugins.utils.data_quality_tasks import compare_data_size, check_anomalies, scd_validation
 
 with DAG(
     dag_id="get_data_quality_metrics",

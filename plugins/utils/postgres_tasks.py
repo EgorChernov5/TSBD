@@ -1,5 +1,6 @@
 import logging
 from typing import List
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -98,55 +99,6 @@ def postprocess_postgres_raw_data(**context):
 # tasks after minio
 # ------------------
 
-def presettup(**context):
-    context["ti"].xcom_push(
-        key='table_names',
-        value=['clans', 'players', 'leagues', 'achievements', 'player_achievements', 'player_camps', 'items']
-    )
-
-    # Table clan
-    context["ti"].xcom_push(
-        key="clans_target_fields",
-        value=['tag', 'name', 'members_count', 'war_wins_count', 'clan_level', 'clan_points']
-    )
-    context["ti"].xcom_push(key="clans_keys", value=['tag'])
-    # Table player
-    context["ti"].xcom_push(
-        key="players_target_fields",
-        value=['tag', 'tag_clan', 'name', 'town_hall_level', 'id_league']
-    )
-    context["ti"].xcom_push(key="players_keys", value=['tag'])
-    # Table league
-    context["ti"].xcom_push(
-        key="leagues_target_fields",
-        value=['id_leagues', 'league_name']
-    )
-    context["ti"].xcom_push(key="leagues_keys", value=['id_league'])
-    # Table achievement
-    context["ti"].xcom_push(
-        key="achievements_target_fields",
-        value=['id_achievement', 'name', 'max_starts']
-    )
-    context["ti"].xcom_push(key="achievements_keys", value=['id_achievement'])
-    # Table player_achievement
-    context["ti"].xcom_push(
-        key="player_achievements_target_fields",
-        value=['tag_player', 'id_achievement', 'stars']
-    )
-    context["ti"].xcom_push(key="player_achievements_keys", value=['tag_player', 'id_achievement'])
-    # Table player_camp
-    context["ti"].xcom_push(
-        key="player_camps_target_fields",
-        value=['tag_player', 'id_item', 'level']  # TODO: ['tag_player', 'id_item', 'level', 'icon_link']
-    )
-    context["ti"].xcom_push(key="player_camps_keys", value=['tag_player', 'id_item'])
-    # Table item
-    context["ti"].xcom_push(
-        key="items_target_fields",
-        value=['id_item', 'name', 'item_type', 'village', 'max_level']
-    )
-    context["ti"].xcom_push(key="items_keys", value=['id_item'])
-
 def load_postgres_sqd_data(**context):
     # Create hook
     hook = PostgresDataHook()
@@ -159,7 +111,11 @@ def load_postgres_sqd_data(**context):
     # Iterate over all tables
     tables_data = []
     for table_name, target_fields in zip(table_names, tables_target_fields):
-        data = hook.find(table_name, run_date=None)
+        try:
+            data = hook.find(table_name, run_date=None)
+        except:
+            data = []
+
         if len(data) == 0:
             tables_data.append(pd.DataFrame(columns=target_fields))
         else:
@@ -201,6 +157,7 @@ def compare_scd_data(**context):
         ]
         # New data
         non_key_cols = [c for c in target_fields if c not in keys]
+
         new_clean = new_rows[
             keys + [c + "_new" for c in non_key_cols]
         ].copy()
@@ -213,13 +170,15 @@ def compare_scd_data(**context):
         changed_clean.columns = keys + list(non_key_cols)
         changed_data.append(changed_clean)
 
-    # [clans, players, leagues, achievements, player_achievements, player_camps, items]
+    # tuple of [clans, players, leagues, achievements, player_achievements, player_camps, items]
     return new_data, changed_data
 
 def save_postgres_scd_data(**context):
     hook = PostgresDataHook()
 
     # Get metadata
+    dag_run_timestamp = context['logical_date']
+    max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
     table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
     tables_target_fields = [
         context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
@@ -233,46 +192,45 @@ def save_postgres_scd_data(**context):
     new_data, changed_data = context["ti"].xcom_pull(task_ids="compare_scd_data")
 
     # Close changed data
-    for name, target_fields, keys, df in zip(table_names, tables_target_fields, tables_keys, changed_data):
+    for table_name, target_fields, table_keys, df in zip(table_names, tables_target_fields, tables_keys, changed_data):
         if df.empty:
             continue
 
-        table_name = f"dim_{name}"
-        if name in ['clans', 'players']:
+        if table_name in ['clan', 'player']:
             # SCD-2
             hook.update_scd2_data(
                 df=df,
-                table_name=f"dim_{name}",
-                change_ts="2024-02-01 12:00:00",
-                pk_cols=["client_id", "date"]
+                table_name=table_name,
+                change_ts=dag_run_timestamp,
+                pk_cols=table_keys
             )
         else:
             # SCD-1
             hook.update_scd1_data(
                 df=df,
-                table_name=f"dim_{name}",
-                pk_cols=["client_id", "date"]
+                table_name=table_name,
+                pk_cols=table_keys
             )
 
     # Add new data
-    for name, target_fields, keys, df in zip(table_names, tables_target_fields, tables_keys, new_data):
+    for table_name, target_fields, table_keys, df in zip(table_names, tables_target_fields, tables_keys, new_data):
         if df.empty:
             continue
-        
-        table_name = f"dim_{name}"
-        if name in ['clans', 'players']:
+
+        if table_name in ['clan', 'player']:
             # SCD-2
             hook.create_table_if_not_exists(
                 table_name,
-                target_fields + ["start_date", "end_date", "is_current"],
-                tuple(df.values[0]) + (None, None, True),  # TODO: fix types
-                keys,
-                'id_sk'
+                target_fields + ["start_date", "end_date"],
+                tuple(df.values[0]) + (dag_run_timestamp, max_date),
+                table_keys,
+                'id',
+                [(*table_keys, 'end_date')]
             )
             hook.insert_scd2_data(
                 df=df,
                 table_name=table_name,
-                change_ts="2024-02-01 12:00:00"
+                change_ts=dag_run_timestamp
             )
         else:
             # SCD-1
@@ -280,69 +238,11 @@ def save_postgres_scd_data(**context):
                 table_name,
                 target_fields,
                 tuple(df.values[0]),
-                keys
+                table_keys,
+                unique_constraints=[tuple(table_keys)]
             )
             hook.insert_scd1_data(
                 df=df,
                 table_name=table_name,
-                pk_cols=keys
+                pk_cols=table_keys
             )
-
-# TODO: add SCD-2
-def scd_postgres_norm_data(**context):
-    hook = PostgresDataHook()
-
-    clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="norm_minio_raw_data")
-
-    apply_scd(
-        hook,
-        'dds_clan',
-        clans[0],
-        clans[1:],
-        ['tag'],
-        ['members_count', 'war_wins_count', 'clan_level', 'clan_points']
-    )
-
-def save_postgres_norm_data(**context):
-    hook = PostgresDataHook()
-
-    # Get data from previous task
-    clans, players, leagues, achievements, player_achievements, player_camps, items = context["ti"].xcom_pull(task_ids="norm_minio_raw_data")
-    
-    # Init tables
-    clan_table = "dds_clan"
-    clan_columns = clans.pop(0)
-    hook.create_table_if_not_exists(clan_table, clan_columns, clans[0], primary_keys=["tag"], surrogate_key='id_sk')
-
-    # player_table = "dds_player"
-    # player_columns = players.pop(0)
-    # hook.create_table_if_not_exists(player_table, player_columns, players[0], primary_keys=["tag"])
-
-    # league_table = "dds_league"
-    # league_columns = leagues.pop(0)
-    # hook.create_table_if_not_exists(league_table, league_columns, leagues[0], primary_keys=["id_leagues"])
-
-    # achievement_table = "dds_achievement"
-    # achievement_columns = achievements.pop(0)
-    # hook.create_table_if_not_exists(achievement_table, achievement_columns, achievements[0], primary_keys=["id_achievement"])
-
-    # player_achievement_table = "dds_player_achievement"
-    # player_achievement_columns = player_achievements.pop(0)
-    # hook.create_table_if_not_exists(player_achievement_table, player_achievement_columns, player_achievements[0], primary_keys=["tag", "id_achievement"])
-
-    # player_camp_table = "dds_player_camp"
-    # player_camp_columns = player_camps.pop(0)
-    # hook.create_table_if_not_exists(player_camp_table, player_camp_columns, player_camps[0], primary_keys=["tag", "id_item"])
-
-    # item_table = "dds_item"
-    # item_columns = items.pop(0)
-    # hook.create_table_if_not_exists(item_table, item_columns, items[0], primary_keys=["id_item"])
-
-    # Insert data
-    # hook.insert_norm_rows(clan_table, clans, clan_columns)
-    # hook.insert_norm_rows(player_table, players, player_columns)
-    # hook.insert_norm_rows(league_table, leagues, league_columns)
-    # hook.insert_norm_rows(achievement_table, achievements, achievement_columns)
-    # hook.insert_norm_rows(player_achievement_table, player_achievements, player_achievement_columns)
-    # hook.insert_norm_rows(player_camp_table, player_camps, player_camp_columns)
-    # hook.insert_norm_rows(item_table, items, item_columns)

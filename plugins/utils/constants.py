@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 
 SQL_TYPE_MAP = {
@@ -8,6 +8,15 @@ SQL_TYPE_MAP = {
     bool: "BOOLEAN",
     dict: "JSONB",
     list: "JSONB",
-    type(None): "TEXT",
-    date: "DATE NOT NULL"
+    type(None): "TEXT"
 }
+
+
+def map_python_to_sql_type(value):
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return "TIMESTAMPTZ"
+        else:
+            return "TIMESTAMP"
+
+    return SQL_TYPE_MAP.get(type(value), "TEXT")

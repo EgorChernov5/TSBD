@@ -2,10 +2,9 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import timezone
 from airflow import DAG
 from airflow.sensors.external_task import ExternalTaskSensor
+from airflow.utils.state import DagRunState
 
 from plugins.utils.minio_tasks import (
-    presettup,
-
     load_minio_raw_data,
     load_minio_raw_clan_data,
 
@@ -14,6 +13,7 @@ from plugins.utils.minio_tasks import (
     
     save_minio_norm_data
 )
+from plugins.utils.settup_task import presettup
 
 with DAG(
     dag_id="minio_norm_data",
@@ -21,16 +21,16 @@ with DAG(
     schedule=None,
     catchup=False,
 ) as dag:
-    wait_for_coc_minio_data = ExternalTaskSensor(
-        task_id="wait_for_coc_minio_data_dag",
-        external_dag_id="coc_minio_preprocess_data",    # dag, который ждём
-        external_task_id="save_minio_raw_data",         # ждём завершения последней задачи
-        allowed_states=["success"],
-        failed_states=["failed"],
-        mode="reschedule",                              # важно, чтобы не жрал слот воркера
-        poke_interval=60*5,                              # проверка каждые 5 мин
-        timeout=60*60*6,                                # таймаут 6 часов
-    )
+    # wait_for_coc_minio_data = ExternalTaskSensor(
+    #     task_id="wait_for_coc_minio_data_dag",
+    #     external_dag_id="coc_minio_preprocess_data",    # dag, который ждём
+    #     external_task_id="save_minio_raw_data",         # ждём завершения последней задачи
+    #     allowed_states=[DagRunState.SUCCESS],
+    #     failed_states=[DagRunState.FAILED],
+    #     mode="reschedule",                              # важно, чтобы не жрал слот воркера
+    #     poke_interval=60*5,                              # проверка каждые 5 мин
+    #     timeout=60*60*6,                                # таймаут 6 часов
+    # )
 
     presettup_task = PythonOperator(
         task_id="presettup",
