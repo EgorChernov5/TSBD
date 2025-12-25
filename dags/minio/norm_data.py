@@ -19,7 +19,7 @@ from plugins.utils.settup_task import presettup
 with DAG(
     dag_id="minio_norm_data",
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
-    schedule="0 */6 * * *",
+    schedule="0 * * * *",
     catchup=False,
 ) as dag:
     # wait_for_coc_minio_data = ExternalTaskSensor(
