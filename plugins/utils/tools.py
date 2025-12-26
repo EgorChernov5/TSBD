@@ -152,3 +152,11 @@ def apply_scd(
     #     today,
     #     end_date_sentinel
     # )
+
+
+def convert_types(src_df, dst_df):
+    for col in src_df.columns:
+        if col in dst_df.columns:
+            dst_df[col] = dst_df[col].astype(src_df[col].dtype)
+
+    return dst_df

@@ -9,7 +9,7 @@ import pandas as pd
 from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
-from plugins.utils.constants import SQL_TYPE_MAP, map_python_to_sql_type
+from plugins.utils.constants import SQL_TYPE_MAP, END_DATE, map_python_to_sql_type
 
 class PostgresDataHook(BaseHook):
     def __init__(self, postgres_conn_id: str = "postgres_default"):
@@ -273,40 +273,34 @@ class PostgresDataHook(BaseHook):
         """
         Insert only NEW SCD2 rows
         """
-        max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
-
         if df.empty:
             self.log.info("No rows to insert for SCD2 in %s", table_name)
             return
 
         cols = list(df.columns)
+        cols.append('end_date')
 
         conn = self.hook.get_conn()
         try:
             with conn.cursor() as cur:
-                values = [tuple(v) for v in df.values]
+                values = [tuple(v) + (END_DATE,) for v in df.values]
 
                 execute_values(
                     cur,
                     f"""
                     INSERT INTO {schema}.{table_name} (
-                        {", ".join(cols)},
-                        start_date,
-                        end_date
+                        {", ".join(cols)}
                     )
                     VALUES %s
                     """,
-                    [
-                        (*row, change_ts, max_date)
-                        for row in values
-                    ]
+                    values
                 )
 
             conn.commit()
             self.log.info("Inserted %s new rows into %s", len(df), table_name)
         except Exception:
             conn.rollback()
-            self.log.exception("Insert new SCD2 data failed")
+            self.log.exception("Insert new SCD2 data to %s failed", table_name)
             raise
         finally:
             conn.close()
@@ -410,6 +404,39 @@ class PostgresDataHook(BaseHook):
 
             return current_rows, bk_col_list
 
+    def find_actual(
+        self,
+        table_name: str,
+        actual_field: Optional[str] = None
+        ):
+        conn = self.hook.get_conn()
+        cursor = conn.cursor()
+        cols = []
+        data = []
+        try:
+            if actual_field:
+                cursor.execute(
+                    f"""
+                    SELECT * FROM {table_name} WHERE {actual_field} = %s;
+                    """,
+                    (END_DATE,)
+                )
+            else:
+                cursor.execute(f" SELECT * FROM {table_name};")
+            
+            cols = [desc[0] for desc in cursor.description]
+            data = cursor.fetchall()
+
+            logging.info(f"Data from table '{table_name}' selected.")
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed to select data from table {table_name}: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+        
+        return cols, data
+
     def update_scd1_data(
         self,
         df: pd.DataFrame,
@@ -448,6 +475,7 @@ class PostgresDataHook(BaseHook):
                     SET {set_expr}
                     WHERE {where_expr}
                 """
+                print(sql)
 
                 # Подготавливаем данные для execute_values
                 values_list = [
@@ -482,23 +510,17 @@ class PostgresDataHook(BaseHook):
         - closes old versions
         - inserts new versions with new surrogate keys
         """
-        max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
-
         if df.empty:
             self.log.info("No rows to update for SCD2 in %s", table_name)
             return
 
-        # Атрибуты, исключаем surrogate и SCD поля
-        scd_cols = {"id", "start_date", "end_date"}
-        data_cols = [c for c in df.columns if c not in pk_cols and c not in scd_cols]
-        all_cols = pk_cols + data_cols  # только бизнес-ключи + данные
+        cols = list(df.columns)
+        cols.append('end_date')
 
         conn = self.hook.get_conn()
-
         try:
             with conn.cursor() as cur:
-
-                # 1️⃣ Создаём temp-таблицу с нужной структурой
+                # Создаём temp-таблицу с нужной структурой
                 cur.execute(f"""
                     CREATE TEMP TABLE tmp_scd (
                         LIKE {schema}.{table_name}
@@ -507,24 +529,20 @@ class PostgresDataHook(BaseHook):
                     ) ON COMMIT DROP;
                 """)
 
-                # 2️⃣ Удаляем лишние колонки (id, start_date, end_date)
-                for col in scd_cols:
-                    cur.execute(f'ALTER TABLE tmp_scd DROP COLUMN IF EXISTS "{col}" CASCADE;')
+                # Удаляем id
+                cur.execute(f'ALTER TABLE tmp_scd DROP COLUMN IF EXISTS "id" CASCADE;')
 
-                # 3️⃣ Загружаем DataFrame в temp через execute_values
-                # Конвертируем даты и числа в подходящие типы
-                values = [tuple(v) for v in df.values]
-
+                # Загружаем DataFrame в temp через execute_values
                 execute_values(
                     cur,
                     f"""
-                    INSERT INTO tmp_scd ({', '.join(all_cols)})
+                    INSERT INTO tmp_scd ({', '.join(cols)})
                     VALUES %s
                     """,
-                    values
+                    [tuple(v) + (END_DATE,) for v in df.values]
                 )
 
-                # 4️⃣ Закрываем текущие активные версии
+                # Закрываем текущие активные версии
                 pk_join = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
 
                 cur.execute(f"""
@@ -533,23 +551,23 @@ class PostgresDataHook(BaseHook):
                     FROM tmp_scd s
                     WHERE {pk_join}
                     AND t.end_date = %s
-                """, (change_ts, max_date))
+                """, (change_ts, END_DATE))
 
-                # 5️⃣ Вставляем новые версии
+                # Вставляем новые версии
                 cur.execute(f"""
                     INSERT INTO {schema}.{table_name} (
-                        {', '.join(all_cols)}, start_date, end_date
+                        {', '.join(cols)}
                     )
-                    SELECT {', '.join([f"s.{c}" for c in all_cols])}, %s, %s
+                    SELECT {', '.join([f"s.{c}" for c in cols])}
                     FROM tmp_scd s
-                """, (change_ts, max_date))
+                """)
 
             conn.commit()
-            self.log.info("SCD2 upsert completed for %s (%s rows)", table_name, len(df))
+            self.log.info("SCD2 update completed for %s (%s rows)", table_name, len(df))
 
         except Exception:
             conn.rollback()
-            self.log.exception("SCD2 upsert failed")
+            self.log.exception("SCD2 update failed")
             raise
 
         finally:

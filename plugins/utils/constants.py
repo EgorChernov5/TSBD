@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 
 SQL_TYPE_MAP = {
@@ -10,6 +10,7 @@ SQL_TYPE_MAP = {
     list: "JSONB",
     type(None): "TEXT"
 }
+END_DATE = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def map_python_to_sql_type(value):
