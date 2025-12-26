@@ -136,6 +136,7 @@ class PostgresDataHook(BaseHook):
             # Если колонка входит в primary_keys, можно добавить NOT NULL
             if column in primary_keys:
                 sql_type += ' NOT NULL'
+            
             columns_sql.append(f"{column} {sql_type}")
 
         # 3️⃣ PRIMARY KEY если суррогатного нет
