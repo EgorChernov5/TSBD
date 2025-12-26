@@ -195,6 +195,7 @@ def split_minio_raw_data(**context):
                 tools.parse_items(player, 'troops', items, player_camps)
                 tools.parse_items(player, 'heroes', items, player_camps)
                 tools.parse_items(player, 'spells', items, player_camps)
+                logging.info(f"process data for player with tag {tag}")
 
     return clans, players, leagues, achievements, player_achievements, player_camps, items
 
