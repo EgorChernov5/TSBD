@@ -463,28 +463,25 @@ class PostgresDataHook(BaseHook):
             return
 
         conn = self.hook.get_conn()
-
         try:
             with conn.cursor() as cur:
                 # Формируем SET выражение
                 set_expr = ", ".join([f"{c} = %s" for c in data_cols])
                 where_expr = " AND ".join([f"{c} = %s" for c in pk_cols])
-
-                sql = f"""
-                    UPDATE {schema}.{table_name}
-                    SET {set_expr}
-                    WHERE {where_expr}
-                """
-                print(sql)
-
                 # Подготавливаем данные для execute_values
                 values_list = [
                     [row[c] for c in data_cols] + [row[c] for c in pk_cols]
                     for _, row in df.iterrows()
                 ]
-
-                # Выполняем пакетное обновление
-                execute_values(cur, sql, values_list, template=None, page_size=100)
+                # Выполняем обновление
+                cur.executemany(
+                    f"""
+                    UPDATE {schema}.{table_name}
+                    SET {set_expr}
+                    WHERE {where_expr}
+                    """,
+                    values_list
+                )
 
             conn.commit()
             self.log.info("SCD1 update completed: %s rows", len(df))
@@ -545,13 +542,16 @@ class PostgresDataHook(BaseHook):
                 # Закрываем текущие активные версии
                 pk_join = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
 
-                cur.execute(f"""
+                cur.execute(
+                    f"""
                     UPDATE {schema}.{table_name} t
                     SET end_date = %s
                     FROM tmp_scd s
                     WHERE {pk_join}
                     AND t.end_date = %s
-                """, (change_ts, END_DATE))
+                    """,
+                    (change_ts, END_DATE)
+                )
 
                 # Вставляем новые версии
                 cur.execute(f"""
