@@ -8,6 +8,7 @@ from plugins.utils.data_quality_tasks import compare_data_size, check_anomalies,
 
 with DAG(
     dag_id="get_data_quality_metrics",
+    is_paused_upon_creation=True,
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
     schedule=None,
     catchup=False,
