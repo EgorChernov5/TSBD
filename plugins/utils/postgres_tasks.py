@@ -153,8 +153,6 @@ def compare_scd_data(**context):
 
         changed_data.append(merged_df.dropna().drop(columns=old_changed_cols).rename(columns=new_changed_cols)[old_df.columns])
         new_data.append(merged_df[merged_df.isna().any(axis=1)].drop(columns=old_changed_cols).rename(columns=new_changed_cols)[old_df.columns])
-        if table_name == 'league':
-            print(merged_df)
 
     # tuple of [clan, player, league, achievement, player_achievement, player_camp, item]
     return new_data, changed_data
