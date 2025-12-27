@@ -9,7 +9,7 @@ SELECT
     ROUND(AVG(pc.level), 2) AS avg_level,
     MAX(pc.level) AS max_level,
     MIN(pc.level) AS min_level,
-    COUNT(pc.player_id) AS players_count
+    COUNT(DISTINCT (pc.player_id, p.start_date)) AS unique_players
 FROM player_camp pc
 JOIN player p ON pc.player_id = p.tag
 JOIN clan c ON p.clan_id = c.tag

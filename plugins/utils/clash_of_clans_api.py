@@ -105,7 +105,7 @@ def get_player_info(
 
 def get_raw_data(
     country_code: str = "RU",
-    top_n_clans: int = 10,
+    top_n_clans: int = 25,
     **context
 ):
     location_info = get_location_info(country_code)
