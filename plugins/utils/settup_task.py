@@ -21,7 +21,7 @@ def presettup(**context):
         key="league_target_fields",
         value=['id', 'name']
     )
-    context["ti"].xcom_push(key="league_keys", value=['id'])
+    context["ti"].xcom_push(key="league_keys", value=['id', 'name'])
     # Table achievement
     context["ti"].xcom_push(
         key="achievement_target_fields",

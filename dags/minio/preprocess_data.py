@@ -9,7 +9,7 @@ from plugins.utils.minio_tasks import save_minio_raw_data
 with DAG(
     dag_id="coc_minio_preprocess_data",
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
-    schedule="0 */6 * * *",
+    schedule="0 * * * *",
     catchup=False,
 ) as dag:
 

@@ -1,3 +1,4 @@
+from plugins.utils.constants import END_DATE
 import logging
 from typing import List
 from datetime import datetime, timezone
@@ -5,7 +6,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from plugins.hooks import PostgresDataHook
-from plugins.utils.tools import apply_scd
+from plugins.utils.tools import apply_scd, convert_types
 
 # ------------------
 # tasks before postgres
@@ -111,26 +112,22 @@ def load_postgres_sqd_data(**context):
     # Iterate over all tables
     tables_data = []
     for table_name, target_fields in zip(table_names, tables_target_fields):
-        try:
-            data = hook.find(table_name, run_date=None)
-        except:
-            data = []
+        actual_fields = None
+        if table_name in ['clan', 'player']:
+            target_fields += ['start_date', 'end_date']
+            actual_fields = 'end_date'
+        
+        cols, data = hook.find_actual(table_name, actual_fields)
 
-        if len(data) == 0:
-            tables_data.append(pd.DataFrame(columns=target_fields))
-        else:
-            tables_data.append(pd.DataFrame(data))
+        df = pd.DataFrame(data=data, columns=cols) if len(cols) else pd.DataFrame(data=data, columns=target_fields)
+        tables_data.append(df[target_fields])
     
-    # clans, players, leagues, achievements, player_achievements, player_camps, items
+    # clan, player, league, achievement, player_achievement, player_camp, item
     return tables_data
 
 def compare_scd_data(**context):
     # Get metadata
     table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
-    tables_target_fields = [
-        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
-        for table_name in table_names
-    ]
     tables_keys = [
         context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_keys")
         for table_name in table_names
@@ -141,36 +138,23 @@ def compare_scd_data(**context):
     # Compare data
     new_data = []
     changed_data = []
-    for keys, target_fields, new_df, old_df in zip(tables_keys, tables_target_fields, mid_data, old_data):
-        merged_df= old_df.merge(
-            new_df,
-            on=keys,
-            how="outer",
-            suffixes=("_old", "_new"),
-            indicator=True
-        )
-        new_rows = merged_df[merged_df["_merge"] == "right_only"]
-        both = merged_df[merged_df["_merge"] == "both"]
-        changed_rows = both[
-            (both[[c for c in merged_df.columns if '_old' in c]].values !=
-            both[[c for c in merged_df.columns if '_new' in c]].values).any(axis=1)
-        ]
-        # New data
-        non_key_cols = [c for c in target_fields if c not in keys]
+    for table_name, keys, new_df, old_df in zip(table_names, tables_keys, mid_data, old_data):
+        old_df = convert_types(new_df, old_df)
+        merged_df = old_df.merge(new_df, how='right', on=keys, suffixes=('_old', '_new'))
 
-        new_clean = new_rows[
-            keys + [c + "_new" for c in non_key_cols]
-        ].copy()
-        new_clean.columns = keys + list(non_key_cols)
-        new_data.append(new_clean)
-        # Changed data
-        changed_clean = changed_rows[
-            keys + [c + "_new" for c in non_key_cols]
-        ].copy()
-        changed_clean.columns = keys + list(non_key_cols)
-        changed_data.append(changed_clean)
+        merged_cols = [c.replace('_old', '') for c in merged_df.columns if '_old' in c]
+        old_changed_cols = {c + '_old': c for c in merged_cols}
+        new_changed_cols = {c + '_new': c for c in merged_cols}
 
-    # tuple of [clans, players, leagues, achievements, player_achievements, player_camps, items]
+        merged_df = merged_df[(
+            merged_df[list(old_changed_cols.keys())].fillna('__NA__').values !=
+            merged_df[list(new_changed_cols.keys())].fillna('__NA__').values
+        ).any(axis=1)]
+
+        changed_data.append(merged_df.dropna().drop(columns=old_changed_cols).rename(columns=new_changed_cols)[old_df.columns])
+        new_data.append(merged_df[merged_df.isna().any(axis=1)].drop(columns=old_changed_cols).rename(columns=new_changed_cols)[old_df.columns])
+
+    # tuple of [clan, player, league, achievement, player_achievement, player_camp, item]
     return new_data, changed_data
 
 def save_postgres_scd_data(**context):
@@ -178,12 +162,7 @@ def save_postgres_scd_data(**context):
 
     # Get metadata
     dag_run_timestamp = context['logical_date']
-    max_date = datetime(9999, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
     table_names = context["ti"].xcom_pull(task_ids="presettup", key="table_names")
-    tables_target_fields = [
-        context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_target_fields")
-        for table_name in table_names
-    ]
     tables_keys = [
         context["ti"].xcom_pull(task_ids="presettup", key=f"{table_name}_keys")
         for table_name in table_names
@@ -192,12 +171,15 @@ def save_postgres_scd_data(**context):
     new_data, changed_data = context["ti"].xcom_pull(task_ids="compare_scd_data")
 
     # Close changed data
-    for table_name, target_fields, table_keys, df in zip(table_names, tables_target_fields, tables_keys, changed_data):
+    for table_name, table_keys, df in zip(table_names, tables_keys, changed_data):
         if df.empty:
             continue
 
         if table_name in ['clan', 'player']:
             # SCD-2
+            # Update df
+            df = df.assign(start_date=dag_run_timestamp).drop(columns=['end_date'])
+            # Send request
             hook.update_scd2_data(
                 df=df,
                 table_name=table_name,
@@ -213,16 +195,19 @@ def save_postgres_scd_data(**context):
             )
 
     # Add new data
-    for table_name, target_fields, table_keys, df in zip(table_names, tables_target_fields, tables_keys, new_data):
+    for table_name, table_keys, df in zip(table_names, tables_keys, new_data):
         if df.empty:
             continue
 
         if table_name in ['clan', 'player']:
             # SCD-2
+            # Update df
+            df = df.assign(start_date=dag_run_timestamp).drop(columns=['end_date'])
+            # Send requests
             hook.create_table_if_not_exists(
                 table_name,
-                target_fields + ["start_date", "end_date"],
-                tuple(df.values[0]) + (dag_run_timestamp, max_date),
+                tuple(df.columns) + ('end_date',),
+                tuple(df.iloc[0]) + (END_DATE,),
                 table_keys,
                 'id',
                 [(*table_keys, 'end_date')]
@@ -236,7 +221,7 @@ def save_postgres_scd_data(**context):
             # SCD-1
             hook.create_table_if_not_exists(
                 table_name,
-                target_fields,
+                df.columns,
                 tuple(df.values[0]),
                 table_keys,
                 unique_constraints=[tuple(table_keys)]

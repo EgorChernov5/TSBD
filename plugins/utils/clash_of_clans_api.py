@@ -105,7 +105,7 @@ def get_player_info(
 
 def get_raw_data(
     country_code: str = "RU",
-    top_n_clans: int = 1,
+    top_n_clans: int = 10,
     **context
 ):
     location_info = get_location_info(country_code)
@@ -127,6 +127,7 @@ def get_raw_data(
             member_tag = member["tag"]
             member_info = get_player_info(member_tag)
             top_clans_member_info[clan_tag].append({member_tag: member_info})
+            logging.info(f"sucessfully get info about player with tag {member_tag}")
 
         logging.info(f"sucessfully get info about clan with tag {clan_tag}")
 

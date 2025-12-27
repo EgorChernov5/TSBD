@@ -7,7 +7,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 with DAG(
     dag_id="mart_data",
     start_date=timezone.datetime(2025, 12, 9, 0, 0, 0),
-    schedule="0 */6 * * *",
+    schedule="0 * * * *",
     catchup=False,
     template_searchpath=["/opt/airflow/sql"]
 ) as dag:
